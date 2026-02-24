@@ -130,12 +130,11 @@ for trace in fig_3d.data:
     # Pega os dados apenas da área atual do loop
     df_trace = df_filtrado[df_filtrado['Área'] == area_name]
     
-    # Se estiver vencido, borda vermelha espessa (6). Se não, transparente (0).
+    # Se estiver vencido a borda é vermelha. Se não, é transparente (rgba com alpha 0)
     line_colors = ['red' if v else 'rgba(0,0,0,0)' for v in df_trace['Vencido']]
-    line_widths = [6 if v else 0 for v in df_trace['Vencido']]
     
-    # Aplica a borda na renderização 3D
-    trace.marker.line = dict(color=line_colors, width=line_widths)
+    # A correção está aqui: passamos a lista de cores, mas a espessura (width) é um número fixo!
+    trace.marker.line = dict(color=line_colors, width=5)
 
 # 4. Ajustes finais da câmera e eixos
 fig_3d.update_layout(scene=dict(
