@@ -25,7 +25,7 @@ def carregar_dados(arquivo):
     df_layout['Coluna'] = pd.to_numeric(df_layout['Coluna'])
     df_layout['Nível'] = pd.to_numeric(df_layout['Nível'])
     
-    df_layout['Área_Exibicao'] = df_layout['Tp.posição depósito'].fillna('Desconhecido')
+    df_layout['Área_Exibicao'] = df_layout['Área armazmto.'].fillna('Desconhecido')
 
     # B. Carregar o ESTOQUE DO USUÁRIO
     if arquivo is not None:
