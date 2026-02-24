@@ -1,11 +1,12 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
+import numpy as np
 from datetime import datetime
 
 st.set_page_config(page_title="Simulador de Estoque 3D", layout="wide")
 
-# Função para formatar números no padrão BR (ex: 1.000)
 def formata_br(numero):
     return f"{numero:,.0f}".replace(",", ".")
 
@@ -17,7 +18,6 @@ arquivo_estoque = st.sidebar.file_uploader("Faça upload do Estoque (Excel ou CS
 
 @st.cache_data
 def carregar_dados(arquivo):
-    # A. Carregar o ESQUELETO (Layout do Galpão - Fixo)
     try:
         df_layout = pd.read_csv("EXPORT_20260224_122851.xlsx - Data.csv", encoding="latin-1", sep=";")
     except FileNotFoundError:
@@ -29,16 +29,19 @@ def carregar_dados(arquivo):
     df_layout['Coluna'] = pd.to_numeric(df_layout['Coluna'])
     df_layout['Nível'] = pd.to_numeric(df_layout['Nível'])
     
-    # TRUQUE DO VÃO LIVRE: Afasta os corredores e separa lado Par e Ímpar
+    # Cálculo para a Visão Macro (Galpão Inteiro)
     df_layout['Y_Plot'] = df_layout['Corredor'] * 3
     df_layout['Y_Plot'] = df_layout.apply(
         lambda row: row['Y_Plot'] + 0.8 if row['Coluna'] % 2 == 0 else row['Y_Plot'] - 0.8, 
         axis=1
     )
     
+    # Cálculo para a Visão Micro (Dentro de 1 Corredor)
+    # Lado Par fica em Y=1, Lado Ímpar fica em Y=-1
+    df_layout['Y_Micro'] = df_layout['Coluna'].apply(lambda x: 1 if x % 2 == 0 else -1)
+    
     df_layout['Área_Exibicao'] = df_layout['Área armazmto.'].fillna('Desconhecido')
 
-    # B. Carregar o ESTOQUE DO USUÁRIO
     if arquivo is not None:
         if arquivo.name.endswith('.csv'):
             try:
@@ -55,7 +58,6 @@ def carregar_dados(arquivo):
         if 'Vencimento' in dados_estoque.columns:
             dados_estoque['Vencimento'] = pd.to_datetime(dados_estoque['Vencimento'], errors='coerce')
             
-        # C. CRUZAR OS DADOS
         df_completo = pd.merge(df_layout, dados_estoque, on="Posição no depósito", how="left")
         
         df_completo['Produto'] = df_completo.get('Produto', pd.Series(['-']*len(df_completo))).fillna('-')
@@ -69,9 +71,7 @@ def carregar_dados(arquivo):
             df_completo['Vencido'] = (df_completo['Vencimento'] < hoje) & (df_completo['Status'] == 'Ocupado')
         else:
             df_completo['Vencido'] = False
-            
     else:
-        # Cria a estrutura aramada vazia se não houver upload
         df_completo = df_layout.copy()
         df_completo['Status'] = 'Vazio'
         df_completo['Vencido'] = False
@@ -89,10 +89,10 @@ df = carregar_dados(arquivo_estoque)
 if df.empty:
     st.stop()
 
-# --- BARRA LATERAL: FILTROS E VISUALIZAÇÃO ---
-st.sidebar.header("🔍 2. Filtros")
+# --- BARRA LATERAL: FILTROS GERAIS ---
+st.sidebar.header("🔍 2. Filtros Globais")
 
-mostrar_estrutura = st.sidebar.toggle("Mostrar Estrutura (Porta-Paletes Vazios)", value=True)
+mostrar_estrutura = st.sidebar.toggle("Mostrar Estrutura Vazia", value=True)
 
 areas_disponiveis = [a for a in df["Área_Exibicao"].unique() if str(a) != "nan" and str(a) != "Desconhecido" and a != " ESTRUTURA VAZIA"]
 areas_disponiveis.sort()
@@ -110,12 +110,10 @@ else:
 
 data_pesquisa = st.sidebar.selectbox("Pesquisa por Data de Vencimento", options=["Todas"] + datas_unicas)
 
-# Aplicar filtros
 df_filtrado = df.copy()
 
 if not mostrar_estrutura:
     df_filtrado = df_filtrado[df_filtrado['Status'] == 'Ocupado']
-
 if area_pesquisa != "Todas":
     df_filtrado = df_filtrado[df_filtrado["Área_Exibicao"] == area_pesquisa]
 if produto_pesquisa:
@@ -125,14 +123,10 @@ if endereco_pesquisa:
 if data_pesquisa != "Todas":
     df_filtrado = df_filtrado[(df_filtrado['Vencimento'].dt.date == data_pesquisa) | (df_filtrado['Status'] == 'Vazio')]
 
-
 # ==========================================
-# 3. DASHBOARDS E INDICADORES (Agora no topo!)
+# INDICADORES DA OPERAÇÃO
 # ==========================================
-st.markdown("---")
 st.markdown("### 📊 Indicadores da Operação")
-
-# Dados para os cards
 df_real = df[df['Área_Exibicao'] != 'Desconhecido']
 total_posicoes = len(df_real)
 ocupadas = len(df_real[df_real['Status'] == 'Ocupado'])
@@ -140,11 +134,9 @@ vazias = len(df_real[df_real['Status'] == 'Vazio'])
 vencidos = len(df_real[df_real['Vencido'] == True])
 taxa_ocupacao = (ocupadas / total_posicoes * 100) if total_posicoes > 0 else 0
 
-# Dados filtrados para resumo
 df_filtrado_ocupado = df_filtrado[df_filtrado['Status'] == 'Ocupado']
 qtd_filtrada = df_filtrado_ocupado['Quantidade'].sum()
 
-# Linha de Métricas Gerais
 col1, col2, col3, col4, col5 = st.columns(5)
 col1.metric("📦 Ocupadas (Geral)", formata_br(ocupadas))
 col2.metric("🟩 Vazias (Geral)", formata_br(vazias))
@@ -152,19 +144,10 @@ col3.metric("📈 Ocupação (Geral)", f"{taxa_ocupacao:.1f}%")
 col4.metric("🚨 Vencidos", formata_br(vencidos))
 col5.metric("🔍 Qtd. Peças no Filtro", formata_br(qtd_filtrada))
 
-# Linha de Gráficos
-st.markdown("<br>", unsafe_allow_html=True)
 graf_col1, graf_col2 = st.columns([1, 2])
-
 with graf_col1:
-    fig_pizza = px.pie(
-        names=['Ocupadas', 'Vazias'], 
-        values=[ocupadas, vazias], 
-        title="Ocupação do Galpão",
-        color_discrete_sequence=['#1f77b4', '#e6e6e6'],
-        hole=0.5 # Transforma em gráfico de rosca
-    )
-    fig_pizza.update_layout(height=350, margin=dict(t=40, b=0, l=0, r=0))
+    fig_pizza = px.pie(names=['Ocupadas', 'Vazias'], values=[ocupadas, vazias], color_discrete_sequence=['#1f77b4', '#e6e6e6'], hole=0.5)
+    fig_pizza.update_layout(height=300, margin=dict(t=10, b=0, l=0, r=0))
     st.plotly_chart(fig_pizza, use_container_width=True)
 
 with graf_col2:
@@ -172,92 +155,116 @@ with graf_col2:
         top_produtos = df_real[df_real['Status'] == 'Ocupado'].groupby(['Produto', 'Descrição produto'])['Quantidade'].sum().reset_index()
         top_produtos = top_produtos.sort_values(by='Quantidade', ascending=False).head(5)
         top_produtos['Label'] = top_produtos['Produto'].astype(str) + " - " + top_produtos['Descrição produto'].str[:20] + "..."
-        
-        fig_bar = px.bar(
-            top_produtos, 
-            x='Quantidade', 
-            y='Label', 
-            orientation='h',
-            title="Top 5 Produtos em Estoque (Geral)",
-            text_auto='.2s',
-            color_discrete_sequence=['#2ca02c']
-        )
-        fig_bar.update_layout(yaxis={'categoryorder':'total ascending'}, height=350, margin=dict(t=40, b=0, l=0, r=0))
+        fig_bar = px.bar(top_produtos, x='Quantidade', y='Label', orientation='h', text_auto='.2s', color_discrete_sequence=['#2ca02c'])
+        fig_bar.update_layout(yaxis={'categoryorder':'total ascending'}, height=300, margin=dict(t=10, b=0, l=0, r=0))
         st.plotly_chart(fig_bar, use_container_width=True)
-    else:
-        st.info("Faça o upload do estoque para ver os produtos.")
-
-if df_filtrado.empty:
-    st.warning("Nenhum dado para exibir com os filtros atuais no mapa 3D.")
-    st.stop()
-
 
 # ==========================================
-# 4. SIMULADOR 3D
+# ABAS DE VISUALIZAÇÃO 3D
 # ==========================================
 st.markdown("---")
-st.markdown("### 🏗️ Mapa 3D do CD")
+aba_macro, aba_micro = st.tabs(["🌐 Visão Global (Mapa do CD)", "🛣️ Visão do Corredor (Detalhe Limpo)"])
 
 paleta_segura = ['#1f77b4', '#2ca02c', '#ff7f0e', '#9467bd', '#8c564b', '#17becf', '#e377c2', '#7f7f7f', '#bcbd22']
 mapa_cores = {' ESTRUTURA VAZIA': 'gray'}
 for i, area in enumerate(areas_disponiveis):
     mapa_cores[area] = paleta_segura[i % len(paleta_segura)]
 
-fig_3d = px.scatter_3d(
-    df_filtrado, 
-    x='Coluna', 
-    y='Y_Plot', 
-    z='Nível',
-    color='Cor_Plot',
-    color_discrete_map=mapa_cores,
-    hover_name='Posição no depósito',
-    hover_data={
-        'Status': True, 'Produto': True, 'Quantidade': True, 'Vencido': True,
-        'Cor_Plot': False, 'Coluna': False, 'Y_Plot': False, 'Nível': False, 'Corredor': False
-    }
-)
+# --- ABA 1: VISÃO MACRO (Galpão Inteiro) ---
+with aba_macro:
+    st.markdown("##### 📍 Heatmap e Radar do Galpão")
+    fig_macro = px.scatter_3d(
+        df_filtrado, x='Coluna', y='Y_Plot', z='Nível', color='Cor_Plot',
+        color_discrete_map=mapa_cores, hover_name='Posição no depósito',
+        hover_data={'Status': True, 'Produto': True, 'Quantidade': True, 'Vencido': True, 'Cor_Plot': False, 'Coluna': False, 'Y_Plot': False, 'Nível': False, 'Corredor': False}
+    )
 
-for trace in fig_3d.data:
-    nome_legenda = trace.name
-    if nome_legenda == ' ESTRUTURA VAZIA':
-        # TRUQUE DO VISUAL ARAMADO: square-open desenha apenas as bordas do quadrado
-        trace.marker.color = 'rgba(150, 150, 150, 0.5)'
-        trace.marker.symbol = 'square-open' 
-        trace.marker.size = 5 
+    for trace in fig_macro.data:
+        nome_legenda = trace.name
+        if nome_legenda == ' ESTRUTURA VAZIA':
+            trace.marker.color = 'rgba(150, 150, 150, 0.3)'
+            trace.marker.symbol = 'square-open' 
+            trace.marker.size = 3 
+        else:
+            df_trace = df_filtrado[df_filtrado['Cor_Plot'] == nome_legenda]
+            line_colors = ['red' if v else 'rgba(0,0,0,0)' for v in df_trace['Vencido']]
+            trace.marker.line = dict(color=line_colors, width=5) 
+            trace.marker.symbol = 'square'
+            trace.marker.size = 3.5 
+
+    fig_macro.update_layout(
+        scene=dict(
+            xaxis_title='Colunas', yaxis_title='Corredores', zaxis_title='Níveis',
+            aspectmode='manual', aspectratio=dict(x=3.5, y=1.5, z=0.5)
+        ),
+        dragmode="turntable", height=600, margin=dict(l=0, r=0, b=0, t=0)
+    )
+    
+    evento_macro = st.plotly_chart(fig_macro, use_container_width=True, on_select="rerun", selection_mode="points", key="macro_chart")
+
+# --- ABA 2: VISÃO MICRO (Corredor Isolado) ---
+with aba_micro:
+    st.markdown("##### 🔍 Inspeção Realista do Corredor")
+    
+    corredores_unicos = sorted(df['Corredor'].unique())
+    corredor_alvo = st.selectbox("Selecione o Corredor para inspecionar:", corredores_unicos)
+    
+    df_corredor = df_filtrado[df_filtrado['Corredor'] == corredor_alvo].copy()
+    
+    if df_corredor.empty:
+        st.info("Nenhuma posição encontrada neste corredor com os filtros atuais.")
     else:
-        # CUBOS CHEIOS (Ocupados)
-        df_trace = df_filtrado[df_filtrado['Cor_Plot'] == nome_legenda]
-        line_colors = ['red' if v else 'rgba(0,0,0,0)' for v in df_trace['Vencido']]
-        trace.marker.line = dict(color=line_colors, width=5) 
-        trace.marker.symbol = 'square'
-        trace.marker.size = 4.5 
+        fig_micro = px.scatter_3d(
+            df_corredor, x='Coluna', y='Y_Micro', z='Nível', color='Cor_Plot',
+            color_discrete_map=mapa_cores, hover_name='Posição no depósito',
+            hover_data={'Status': True, 'Produto': True, 'Quantidade': True, 'Vencido': True, 'Cor_Plot': False, 'Coluna': False, 'Y_Micro': False, 'Nível': False, 'Corredor': False}
+        )
 
-fig_3d.update_layout(
-    scene=dict(
-        xaxis_title='Colunas',
-        yaxis_title='Corredores',
-        zaxis_title='Níveis',
-        aspectmode='manual',
-        aspectratio=dict(x=3.5, y=1.5, z=0.5) # Deixa o galpão mais largo
-    ),
-    dragmode="turntable", # GARANTE que o clique e arraste vai rotacionar a câmera
-    height=750,
-    margin=dict(l=0, r=0, b=0, t=0),
-    legend_title_text='Legenda do Depósito'
-)
+        for trace in fig_micro.data:
+            nome_legenda = trace.name
+            if nome_legenda == ' ESTRUTURA VAZIA':
+                trace.marker.color = 'rgba(150, 150, 150, 0.8)'
+                trace.marker.symbol = 'square-open' 
+                trace.marker.size = 12 # Bem maior na visão micro
+                trace.marker.line = dict(width=3)
+            else:
+                df_trace = df_corredor[df_corredor['Cor_Plot'] == nome_legenda]
+                line_colors = ['red' if v else 'rgba(0,0,0,1)' for v in df_trace['Vencido']]
+                trace.marker.line = dict(color=line_colors, width=4) 
+                trace.marker.symbol = 'square'
+                trace.marker.size = 14 # Paletes grandes
 
-# Renderiza o gráfico e CAPTURA O CLIQUE
-evento = st.plotly_chart(fig_3d, use_container_width=True, on_select="rerun", selection_mode="points")
+        # O SEGREDO DO VISUAL "CLEAN": Desligando todos os eixos e grades
+        eixo_invisivel = dict(showbackground=False, showgrid=False, showline=False, showticklabels=False, title='')
+        
+        # Ajustando a proporção para parecer uma estante real (comprida no X, apertada no Y)
+        tamanho_x = max(2, len(df_corredor['Coluna'].unique()) * 0.1)
+
+        fig_micro.update_layout(
+            scene=dict(
+                xaxis=eixo_invisivel, yaxis=eixo_invisivel, zaxis=eixo_invisivel,
+                aspectmode='manual', aspectratio=dict(x=tamanho_x, y=0.5, z=0.8)
+            ),
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+            dragmode="turntable", height=700, margin=dict(l=0, r=0, b=0, t=0)
+        )
+        
+        evento_micro = st.plotly_chart(fig_micro, use_container_width=True, on_select="rerun", selection_mode="points", key="micro_chart")
+
 
 # ==========================================
-# PAINEL DE DETALHES DO CLIQUE
+# PAINEL DE DETALHES DO CLIQUE (Funciona para as duas abas)
 # ==========================================
-if evento and len(evento.selection.points) > 0:
-    ponto_clicado = evento.selection.points[0]
+evento_ativo = evento_macro if (evento_macro and len(evento_macro.selection.points) > 0) else evento_micro
+
+if evento_ativo and len(evento_ativo.selection.points) > 0:
+    ponto_clicado = evento_ativo.selection.points[0]
     endereco_clicado = ponto_clicado["hovertext"]
     
     dados_endereco = df[df['Posição no depósito'] == endereco_clicado].iloc[0]
     
+    st.markdown("---")
     st.markdown(f"### 🔎 Informações do Endereço: `{endereco_clicado}`")
     
     col_d1, col_d2, col_d3 = st.columns(3)
