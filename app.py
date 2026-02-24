@@ -13,7 +13,7 @@ def carregar_dados():
     # A. Carregar o ESQUELETO (Layout do Galpão)
     try:
         # Lê o CSV que você me enviou. Certifique-se de que o nome está correto na sua pasta!
-        df_layout = pd.read_csv("EXPORT_20260224_122851.xlsx - Data.csv")
+        df_layout = pd.read_csv("EXPORT_20260224_122851.xlsx - Data.csv", encoding="latin-1")
     except FileNotFoundError:
         st.error("Arquivo de layout não encontrado. Coloque o CSV na mesma pasta do app.py.")
         return pd.DataFrame()
