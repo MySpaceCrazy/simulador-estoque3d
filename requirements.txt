@@ -3,17 +3,3 @@ pandas
 plotly
 openpyxl
 numpy
-scikit-learn
-matplotlib
-seaborn
-xgboost
-lightgbm
-catboost
-statsmodels
-scipy
-joblib
-requests
-beautifulsoup4
-lxml
-pytest
-pytest-cov
