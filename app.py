@@ -25,7 +25,6 @@ def carregar_dados(arquivo):
     df_layout['Coluna'] = pd.to_numeric(df_layout['Coluna'])
     df_layout['Nível'] = pd.to_numeric(df_layout['Nível'])
     
-    # GARANTIA 1: Usa o Tp.posição depósito da base fixa para as cores
     df_layout['Área_Exibicao'] = df_layout['Tp.posição depósito'].fillna('Desconhecido')
 
     # B. Carregar o ESTOQUE DO USUÁRIO
@@ -39,7 +38,6 @@ def carregar_dados(arquivo):
         else:
             dados_estoque = pd.read_excel(arquivo)
             
-        # Padroniza a coluna de Vencimento caso o sistema gere com nome diferente
         if 'Data do vencimento' in dados_estoque.columns:
             dados_estoque = dados_estoque.rename(columns={'Data do vencimento': 'Vencimento'})
             
@@ -48,7 +46,12 @@ def carregar_dados(arquivo):
             
         # C. CRUZAR OS DADOS (Left Join)
         df_completo = pd.merge(df_layout, dados_estoque, on="Posição no depósito", how="left")
-        df_completo['Status'] = df_completo.get('Produto', pd.Series([None]*len(df_completo))).apply(lambda x: 'Ocupado' if pd.notna(x) else 'Vazio')
+        
+        # Garante que não teremos Nones que quebram o Plotly
+        df_completo['Produto'] = df_completo.get('Produto', pd.Series(['-']*len(df_completo))).fillna('-')
+        df_completo['Quantidade'] = df_completo.get('Quantidade', pd.Series([0]*len(df_completo))).fillna(0)
+        
+        df_completo['Status'] = df_completo['Produto'].apply(lambda x: 'Ocupado' if str(x) != '-' else 'Vazio')
         
         hoje = pd.Timestamp.today()
         if 'Vencimento' in df_completo.columns:
@@ -57,14 +60,15 @@ def carregar_dados(arquivo):
             df_completo['Vencido'] = False
             
     else:
-        # Se vazio, monta a malha pura
+        # CORREÇÃO 1: Evita enviar None para o Plotly inicializando com strings e zeros
         df_completo = df_layout.copy()
         df_completo['Status'] = 'Vazio'
         df_completo['Vencido'] = False
         df_completo['Vencimento'] = pd.NaT
+        df_completo['Produto'] = '-'
+        df_completo['Quantidade'] = 0
 
-    # Cria uma coluna corigatória pro Plotly separar o que é Vazio e o que tem Cor
-    df_completo['Cor_Plot'] = df_completo.apply(lambda row: ' ESTRUTURA VAZIA' if row['Status'] == 'Vazio' else row['Área_Exibicao'], axis=1)
+    df_completo['Cor_Plot'] = df_completo.apply(lambda row: ' ESTRUTURA VAZIA' if row['Status'] == 'Vazio' else str(row['Área_Exibicao']), axis=1)
 
     return df_completo
 
@@ -81,7 +85,6 @@ mostrar_estrutura = st.sidebar.toggle("Mostrar Estrutura (Porta-Paletes Vazios)"
 produto_pesquisa = st.sidebar.text_input("Pesquisa por Produto (Código)")
 endereco_pesquisa = st.sidebar.text_input("Pesquisa por Endereço (ex: 025-071-040-001)")
 
-# GARANTIA 2: Filtro por Data de Vencimento
 df_ocupado = df[df['Status'] == 'Ocupado']
 if 'Vencimento' in df.columns and len(df_ocupado) > 0:
     datas_unicas = df_ocupado['Vencimento'].dt.date.dropna().unique().tolist()
@@ -98,17 +101,14 @@ if not mostrar_estrutura:
     df_filtrado = df_filtrado[df_filtrado['Status'] == 'Ocupado']
 
 if produto_pesquisa:
-    # Mostra o produto E a estrutura para dar contexto geográfico no galpão
     df_filtrado = df_filtrado[(df_filtrado["Produto"].astype(str).str.contains(produto_pesquisa, na=False)) | (df_filtrado['Status'] == 'Vazio')]
 if endereco_pesquisa:
     df_filtrado = df_filtrado[(df_filtrado["Posição no depósito"].str.contains(endereco_pesquisa, na=False)) | (df_filtrado['Status'] == 'Vazio')]
 if data_pesquisa != "Todas":
-    # Aqui também mantemos a estrutura vazia de fundo (se o toggle estiver ativo) para o usuário saber onde a data está fisicamente
     df_filtrado = df_filtrado[(df_filtrado['Vencimento'].dt.date == data_pesquisa) | (df_filtrado['Status'] == 'Vazio')]
 
-# Para evitar travar o navegador se a pesquisa retornar só vazios:
-if not mostrar_estrutura and df_filtrado.empty:
-    st.warning("Nenhum palete encontrado com esses filtros.")
+if df_filtrado.empty:
+    st.warning("Nenhum dado para exibir com os filtros atuais.")
     st.stop()
 
 
@@ -135,26 +135,24 @@ fig_3d = px.scatter_3d(
     }
 )
 
-# GARANTIA 3: Efeito visual Porta-Palete vs Palete Colorido
 for trace in fig_3d.data:
     nome_legenda = trace.name
     
     if nome_legenda == ' ESTRUTURA VAZIA':
-        # ESTRUTURA DO RACK (Maior, fundo transparente, borda cinza escura)
         trace.marker.color = 'rgba(255, 255, 255, 0.0)' 
         trace.marker.line = dict(color='rgba(150, 150, 150, 0.6)', width=2) 
         trace.marker.symbol = 'square'
         trace.marker.size = 6 
     else:
-        # PALETE OCUPADO COM ESTOQUE (Sólido, colorido, um pouco menor para "caber dentro" do rack)
         df_trace = df_filtrado[df_filtrado['Cor_Plot'] == nome_legenda]
-        # Borda vermelha grossa se vencido, senão borda preta fina
-        line_colors = ['red' if v else 'black' for v in df_trace['Vencido']]
-        line_widths = [5 if v else 1 for v in df_trace['Vencido']]
         
-        trace.marker.line = dict(color=line_colors, width=line_widths)
+        # CORREÇÃO 2: O Plotly 3D aceita array para CORES da borda, mas NÃO aceita array para WIDTH.
+        # Portanto, enviamos um width fixo de 4, mas usamos rgba(0,0,0,0) (transparente) para ocultar a borda de quem NÃO está vencido.
+        line_colors = ['red' if v else 'rgba(0,0,0,0)' for v in df_trace['Vencido']]
+        
+        trace.marker.line = dict(color=line_colors, width=4) 
         trace.marker.symbol = 'square'
-        trace.marker.size = 4.5 # Um pouquinho menor que o tamanho 6 da estrutura vazia
+        trace.marker.size = 4.5 
 
 fig_3d.update_layout(
     scene=dict(
