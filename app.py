@@ -29,9 +29,19 @@ def carregar_dados(arquivo):
     # B. Carregar o ESTOQUE DO USUÁRIO
     if arquivo is not None:
         if arquivo.name.endswith('.csv'):
-            dados_estoque = pd.read_csv(arquivo, sep=';', encoding='latin-1')
+            # Usa engine='python' e sep=None para descobrir sozinho se é vírgula ou ponto e vírgula
+            try:
+                dados_estoque = pd.read_csv(arquivo, sep=None, engine='python', encoding='utf-8')
+            except UnicodeDecodeError:
+                arquivo.seek(0) # Volta o arquivo para o começo para tentar de novo
+                dados_estoque = pd.read_csv(arquivo, sep=None, engine='python', encoding='latin-1')
         else:
+            # Lê o Excel agora que o openpyxl está instalado
             dados_estoque = pd.read_excel(arquivo)
+            
+        # Padroniza a coluna de Vencimento caso venha com nomes diferentes
+        if 'Data do vencimento' in dados_estoque.columns:
+            dados_estoque = dados_estoque.rename(columns={'Data do vencimento': 'Vencimento'})
             
         # Converter data de vencimento se ela existir no arquivo
         if 'Vencimento' in dados_estoque.columns:
@@ -41,7 +51,7 @@ def carregar_dados(arquivo):
         df_completo = pd.merge(df_layout, dados_estoque, on="Posição no depósito", how="left")
         
         # Identificar o que é Vazio e o que está Ocupado
-        df_completo['Área_Exibicao'] = df_completo.get('Área_Estoque', pd.Series([None]*len(df_completo))).fillna('VAZIO')
+        df_completo['Área_Exibicao'] = df_completo.get('Tipo de depósito', pd.Series([None]*len(df_completo))).fillna('VAZIO')
         df_completo['Status'] = df_completo.get('Produto', pd.Series([None]*len(df_completo))).apply(lambda x: 'Ocupado' if pd.notna(x) else 'Vazio')
         
         hoje = pd.Timestamp.today()
