@@ -10,6 +10,21 @@ st.set_page_config(page_title="Simulador de Estoque 3D", layout="wide")
 def formata_br(numero):
     return f"{numero:,.0f}".replace(",", ".")
 
+# ==============================
+# FUNÇÃO PARA DESENHAR 3D (Racks)
+# ==============================
+def criar_caixa(x, y, z, dx, dy, dz, cor, opacity=1.0):
+    """Gera um bloco 3D sólido (Mesh3d) para simular o metal da estante"""
+    return go.Mesh3d(
+        x=[x, x+dx, x+dx, x, x, x+dx, x+dx, x],
+        y=[y, y, y+dy, y+dy, y, y, y+dy, y+dy],
+        z=[z, z, z, z, z+dz, z+dz, z+dz, z+dz],
+        i=[0,0,0,1,1,2,4,5,6,4,5,6],
+        j=[1,2,3,2,5,3,5,6,7,0,1,2],
+        k=[2,3,1,5,6,7,6,7,4,1,2,3],
+        color=cor, opacity=opacity, flatshading=True, hoverinfo='skip', showscale=False
+    )
+
 st.title("📦 Simulador de Estoque 3D - CD Passo Fundo")
 
 # --- BARRA LATERAL: UPLOAD DE ARQUIVO ---
@@ -29,16 +44,12 @@ def carregar_dados(arquivo):
     df_layout['Coluna'] = pd.to_numeric(df_layout['Coluna'])
     df_layout['Nível'] = pd.to_numeric(df_layout['Nível'])
     
-    # Cálculo para a Visão Macro (Galpão Inteiro)
+    # Cálculo Y para Visão Macro
     df_layout['Y_Plot'] = df_layout['Corredor'] * 3
-    df_layout['Y_Plot'] = df_layout.apply(
-        lambda row: row['Y_Plot'] + 0.8 if row['Coluna'] % 2 == 0 else row['Y_Plot'] - 0.8, 
-        axis=1
-    )
+    df_layout['Y_Plot'] = df_layout.apply(lambda row: row['Y_Plot'] + 0.8 if row['Coluna'] % 2 == 0 else row['Y_Plot'] - 0.8, axis=1)
     
-    # Cálculo para a Visão Micro (Dentro de 1 Corredor)
+    # Cálculo Y para Visão Micro (Ímpar -1, Par 1)
     df_layout['Y_Micro'] = df_layout['Coluna'].apply(lambda x: 1 if x % 2 == 0 else -1)
-    
     df_layout['Área_Exibicao'] = df_layout['Área armazmto.'].fillna('Desconhecido')
 
     if arquivo is not None:
@@ -62,6 +73,7 @@ def carregar_dados(arquivo):
         df_completo['Produto'] = df_completo.get('Produto', pd.Series(['-']*len(df_completo))).fillna('-')
         df_completo['Quantidade'] = df_completo.get('Quantidade', pd.Series([0]*len(df_completo))).fillna(0)
         df_completo['Descrição produto'] = df_completo.get('Descrição produto', pd.Series(['-']*len(df_completo))).fillna('-')
+        df_completo['Unidade comercial'] = df_completo.get('Unidade comercial', pd.Series(['-']*len(df_completo))).fillna('-')
         
         df_completo['Status'] = df_completo['Produto'].apply(lambda x: 'Ocupado' if str(x) != '-' else 'Vazio')
         
@@ -77,10 +89,10 @@ def carregar_dados(arquivo):
         df_completo['Vencimento'] = pd.NaT
         df_completo['Produto'] = '-'
         df_completo['Descrição produto'] = '-'
+        df_completo['Unidade comercial'] = '-'
         df_completo['Quantidade'] = 0
 
     df_completo['Cor_Plot'] = df_completo.apply(lambda row: ' ESTRUTURA VAZIA' if row['Status'] == 'Vazio' else str(row['Área_Exibicao']), axis=1)
-
     return df_completo
 
 df = carregar_dados(arquivo_estoque)
@@ -123,58 +135,36 @@ if data_pesquisa != "Todas":
     df_filtrado = df_filtrado[(df_filtrado['Vencimento'].dt.date == data_pesquisa) | (df_filtrado['Status'] == 'Vazio')]
 
 # ==========================================
-# INDICADORES DA OPERAÇÃO
+# RESUMO DINÂMICO DOS FILTROS (PONTO 2)
 # ==========================================
-st.markdown("### 📊 Indicadores da Operação")
-df_real = df[df['Área_Exibicao'] != 'Desconhecido']
-total_posicoes = len(df_real)
-ocupadas = len(df_real[df_real['Status'] == 'Ocupado'])
-vazias = len(df_real[df_real['Status'] == 'Vazio'])
-vencidos = len(df_real[df_real['Vencido'] == True])
-taxa_ocupacao = (ocupadas / total_posicoes * 100) if total_posicoes > 0 else 0
+if produto_pesquisa or area_pesquisa != "Todas" or data_pesquisa != "Todas":
+    st.markdown("### 🎯 Resumo do Filtro Aplicado")
+    df_f_ocupado = df_filtrado[df_filtrado['Status'] == 'Ocupado']
+    
+    qtd_pos = len(df_f_ocupado)
+    qtd_unidades = df_f_ocupado['Quantidade'].sum()
+    qtd_produtos = df_f_ocupado['Produto'].nunique()
+    
+    c1, c2, c3 = st.columns(3)
+    c1.info(f"📍 **Posições Utilizadas:** {formata_br(qtd_pos)}")
+    c2.success(f"📦 **Unidades Totais:** {formata_br(qtd_unidades)} un")
+    
+    # Se for pesquisa por área ou data, mostramos os produtos diferentes
+    if area_pesquisa != "Todas" or data_pesquisa != "Todas":
+        c3.warning(f"🏷️ **Produtos Diferentes:** {qtd_produtos} SKUs")
 
-df_filtrado_ocupado = df_filtrado[df_filtrado['Status'] == 'Ocupado']
-qtd_filtrada = df_filtrado_ocupado['Quantidade'].sum()
-
-col1, col2, col3, col4, col5 = st.columns(5)
-col1.metric("📦 Ocupadas (Geral)", formata_br(ocupadas))
-col2.metric("🟩 Vazias (Geral)", formata_br(vazias))
-col3.metric("📈 Ocupação (Geral)", f"{taxa_ocupacao:.1f}%")
-col4.metric("🚨 Vencidos", formata_br(vencidos))
-col5.metric("🔍 Qtd. Peças no Filtro", formata_br(qtd_filtrada))
-
-graf_col1, graf_col2 = st.columns([1, 2])
-with graf_col1:
-    fig_pizza = px.pie(names=['Ocupadas', 'Vazias'], values=[ocupadas, vazias], color_discrete_sequence=['#1f77b4', '#e6e6e6'], hole=0.5)
-    fig_pizza.update_layout(height=300, margin=dict(t=10, b=0, l=0, r=0))
-    st.plotly_chart(fig_pizza, use_container_width=True)
-
-with graf_col2:
-    if not df_real[df_real['Status'] == 'Ocupado'].empty:
-        top_produtos = df_real[df_real['Status'] == 'Ocupado'].groupby(['Produto', 'Descrição produto'])['Quantidade'].sum().reset_index()
-        top_produtos = top_produtos.sort_values(by='Quantidade', ascending=False).head(5)
-        top_produtos['Label'] = top_produtos['Produto'].astype(str) + " - " + top_produtos['Descrição produto'].str[:20] + "..."
-        fig_bar = px.bar(top_produtos, x='Quantidade', y='Label', orientation='h', text_auto='.2s', color_discrete_sequence=['#2ca02c'])
-        fig_bar.update_layout(yaxis={'categoryorder':'total ascending'}, height=300, margin=dict(t=10, b=0, l=0, r=0))
-        st.plotly_chart(fig_bar, use_container_width=True)
-
-if df_filtrado.empty:
-    st.warning("Nenhum dado para exibir com os filtros atuais no mapa 3D.")
-    st.stop()
-
+st.markdown("---")
 
 # ==========================================
 # ABAS DE VISUALIZAÇÃO 3D
 # ==========================================
-st.markdown("---")
-aba_macro, aba_micro = st.tabs(["🌐 Visão Global (Mapa do CD)", "🛣️ Visão do Corredor (Detalhe Limpo)"])
+aba_macro, aba_micro = st.tabs(["🌐 Visão Global (Mapa do CD)", "🏗️ Visão Realista do Corredor (Porta-Paletes)"])
 
 paleta_segura = ['#1f77b4', '#2ca02c', '#ff7f0e', '#9467bd', '#8c564b', '#17becf', '#e377c2', '#7f7f7f', '#bcbd22']
 mapa_cores = {' ESTRUTURA VAZIA': 'gray'}
 for i, area in enumerate(areas_disponiveis):
     mapa_cores[area] = paleta_segura[i % len(paleta_segura)]
 
-# INICIALIZAÇÃO SEGURA DOS EVENTOS (Previne o erro ao filtrar tudo)
 evento_macro = None
 evento_micro = None
 
@@ -201,27 +191,24 @@ with aba_macro:
             trace.marker.size = 3.5 
 
     fig_macro.update_layout(
-        scene=dict(
-            xaxis_title='Colunas', yaxis_title='Corredores', zaxis_title='Níveis',
-            aspectmode='manual', aspectratio=dict(x=3.5, y=1.5, z=0.5)
-        ),
+        scene=dict(xaxis_title='Colunas', yaxis_title='Corredores', zaxis_title='Níveis', aspectmode='manual', aspectratio=dict(x=3.5, y=1.5, z=0.5)),
         dragmode="turntable", height=600, margin=dict(l=0, r=0, b=0, t=0)
     )
-    
     evento_macro = st.plotly_chart(fig_macro, use_container_width=True, on_select="rerun", selection_mode="points", key="macro_chart")
 
-# --- ABA 2: VISÃO MICRO (Corredor Isolado) ---
+# --- ABA 2: VISÃO MICRO COM PORTA-PALETES 3D (PONTO 3) ---
 with aba_micro:
-    st.markdown("##### 🔍 Inspeção Realista do Corredor")
+    st.markdown("##### 🔍 Inspeção Estrutural Realista")
     
     corredores_unicos = sorted(df['Corredor'].unique())
-    corredor_alvo = st.selectbox("Selecione o Corredor para inspecionar:", corredores_unicos)
+    corredor_alvo = st.selectbox("Selecione o Corredor para renderizar a estrutura:", corredores_unicos)
     
     df_corredor = df_filtrado[df_filtrado['Corredor'] == corredor_alvo].copy()
     
     if df_corredor.empty:
         st.info("Nenhuma posição encontrada neste corredor com os filtros atuais.")
     else:
+        # 1. Desenha os paletes e dados flutuantes usando Scatter3D (para capturar os cliques e informações)
         fig_micro = px.scatter_3d(
             df_corredor, x='Coluna', y='Y_Micro', z='Nível', color='Cor_Plot',
             color_discrete_map=mapa_cores, hover_name='Posição no depósito',
@@ -231,39 +218,60 @@ with aba_micro:
         for trace in fig_micro.data:
             nome_legenda = trace.name
             if nome_legenda == ' ESTRUTURA VAZIA':
-                trace.marker.color = 'rgba(150, 150, 150, 0.8)'
+                # Palete vazio fica quase invisível, pois a estante de aço vai fazer o contorno
+                trace.marker.color = 'rgba(255, 255, 255, 0.0)'
                 trace.marker.symbol = 'square-open' 
-                trace.marker.size = 12 
-                trace.marker.line = dict(width=3)
+                trace.marker.size = 1
+                trace.marker.line = dict(width=0)
             else:
+                # Paletes ocupados ficam como cubões sólidos
                 df_trace = df_corredor[df_corredor['Cor_Plot'] == nome_legenda]
                 line_colors = ['red' if v else 'rgba(0,0,0,1)' for v in df_trace['Vencido']]
                 trace.marker.line = dict(color=line_colors, width=4) 
                 trace.marker.symbol = 'square'
-                trace.marker.size = 14 
+                trace.marker.size = 22 # Tamanho gigante para parecer a caixa no rack
 
+        # 2. GERAÇÃO DINÂMICA DA ESTRUTURA METÁLICA (Mesh3d)
+        max_niv = df_corredor['Nível'].max()
+        
+        # Estrutura Lado Ímpar (Y = -1)
+        impares = df_corredor[df_corredor['Coluna'] % 2 != 0]['Coluna'].unique()
+        if len(impares) > 0:
+            min_c, max_c = min(impares), max(impares)
+            for c in range(min_c, max_c + 3, 2):
+                # Coluna Vertical (Azul/Roxo Metálico)
+                fig_micro.add_trace(criar_caixa(c - 1.1, -1.4, 0, 0.2, 0.8, max_niv + 0.5, "#2c3e50"))
+            for n in range(1, int(max_niv) + 1):
+                # Viga Horizontal Laranja Frente e Fundo
+                fig_micro.add_trace(criar_caixa(min_c - 1.1, -0.7, n - 0.2, (max_c - min_c) + 2.2, 0.1, 0.15, "#e67e22"))
+                fig_micro.add_trace(criar_caixa(min_c - 1.1, -1.4, n - 0.2, (max_c - min_c) + 2.2, 0.1, 0.15, "#e67e22"))
+
+        # Estrutura Lado Par (Y = 1)
+        pares = df_corredor[df_corredor['Coluna'] % 2 == 0]['Coluna'].unique()
+        if len(pares) > 0:
+            min_c, max_c = min(pares), max(pares)
+            for c in range(min_c, max_c + 3, 2):
+                fig_micro.add_trace(criar_caixa(c - 1.1, 0.6, 0, 0.2, 0.8, max_niv + 0.5, "#2c3e50"))
+            for n in range(1, int(max_niv) + 1):
+                fig_micro.add_trace(criar_caixa(min_c - 1.1, 0.6, n - 0.2, (max_c - min_c) + 2.2, 0.1, 0.15, "#e67e22"))
+                fig_micro.add_trace(criar_caixa(min_c - 1.1, 1.3, n - 0.2, (max_c - min_c) + 2.2, 0.1, 0.15, "#e67e22"))
+
+        # Eixos Invisíveis para efeito de Jogo/Maquete
         eixo_invisivel = dict(showbackground=False, showgrid=False, showline=False, showticklabels=False, title='')
-        tamanho_x = max(2, len(df_corredor['Coluna'].unique()) * 0.1)
+        tamanho_x = max(2, len(df_corredor['Coluna'].unique()) * 0.15)
 
         fig_micro.update_layout(
-            scene=dict(
-                xaxis=eixo_invisivel, yaxis=eixo_invisivel, zaxis=eixo_invisivel,
-                aspectmode='manual', aspectratio=dict(x=tamanho_x, y=0.5, z=0.8)
-            ),
-            paper_bgcolor='rgba(0,0,0,0)',
-            plot_bgcolor='rgba(0,0,0,0)',
-            dragmode="turntable", height=700, margin=dict(l=0, r=0, b=0, t=0)
+            scene=dict(xaxis=eixo_invisivel, yaxis=eixo_invisivel, zaxis=eixo_invisivel, aspectmode='manual', aspectratio=dict(x=tamanho_x, y=0.5, z=0.8)),
+            paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+            dragmode="turntable", height=800, margin=dict(l=0, r=0, b=0, t=0), showlegend=False
         )
-        
         evento_micro = st.plotly_chart(fig_micro, use_container_width=True, on_select="rerun", selection_mode="points", key="micro_chart")
 
 
 # ==========================================
-# PAINEL DE DETALHES DO CLIQUE SEGURA
+# FICHA COMPLETA DO CLIQUE (PONTO 1)
 # ==========================================
 evento_ativo = None
-
-# Verifica de qual gráfico veio o clique
 if evento_macro and len(evento_macro.selection.points) > 0:
     evento_ativo = evento_macro
 elif evento_micro and len(evento_micro.selection.points) > 0:
@@ -276,22 +284,27 @@ if evento_ativo:
     dados_endereco = df[df['Posição no depósito'] == endereco_clicado].iloc[0]
     
     st.markdown("---")
-    st.markdown(f"### 🔎 Informações do Endereço: `{endereco_clicado}`")
+    st.markdown(f"### 📋 Ficha Técnica: Endereço `{endereco_clicado}`")
     
     col_d1, col_d2, col_d3 = st.columns(3)
     with col_d1:
-        st.write(f"**Área Armaz.:** {dados_endereco['Área_Exibicao']}")
-        st.write(f"**Status:** {dados_endereco['Status']}")
+        st.write(f"**🟢 Status:** {dados_endereco['Status']}")
+        st.write(f"**🏢 Área Armaz.:** {dados_endereco['Área_Exibicao']}")
+        st.write(f"**📏 Tipo Depósito:** {dados_endereco.get('Tipo de depósito', 'N/A')}")
+        
     with col_d2:
-        st.write(f"**Código Produto:** {dados_endereco['Produto']}")
-        st.write(f"**Descrição:** {dados_endereco['Descrição produto']}")
+        st.write(f"**🏷️ Código Produto:** {dados_endereco['Produto']}")
+        st.write(f"**📝 Descrição:** {dados_endereco['Descrição produto']}")
+        st.write(f"**📦 Unid. Comercial (UC):** {dados_endereco['Unidade comercial']}")
+        
     with col_d3:
-        st.write(f"**Quantidade:** {formata_br(dados_endereco['Quantidade'])} un")
+        st.write(f"**🔢 Quantidade:** {formata_br(dados_endereco['Quantidade'])} un")
+        
         if pd.notna(dados_endereco['Vencimento']):
             data_formatada = dados_endereco['Vencimento'].strftime('%d/%m/%Y')
             if dados_endereco['Vencido']:
-                st.error(f"**Validade:** {data_formatada} (VENCIDO)")
+                st.error(f"**⏳ Validade:** {data_formatada} (VENCIDO)")
             else:
-                st.success(f"**Validade:** {data_formatada}")
+                st.success(f"**⏳ Validade:** {data_formatada}")
         else:
-            st.write("**Validade:** N/A")
+            st.write("**⏳ Validade:** N/A")
