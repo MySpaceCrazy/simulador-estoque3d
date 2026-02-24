@@ -25,6 +25,7 @@ def carregar_dados(arquivo):
     df_layout['Coluna'] = pd.to_numeric(df_layout['Coluna'])
     df_layout['Nível'] = pd.to_numeric(df_layout['Nível'])
     
+    # Puxa a área correta do arquivo base
     df_layout['Área_Exibicao'] = df_layout['Área armazmto.'].fillna('Desconhecido')
 
     # B. Carregar o ESTOQUE DO USUÁRIO
@@ -47,7 +48,6 @@ def carregar_dados(arquivo):
         # C. CRUZAR OS DADOS (Left Join)
         df_completo = pd.merge(df_layout, dados_estoque, on="Posição no depósito", how="left")
         
-        # Garante que não teremos Nones que quebram o Plotly
         df_completo['Produto'] = df_completo.get('Produto', pd.Series(['-']*len(df_completo))).fillna('-')
         df_completo['Quantidade'] = df_completo.get('Quantidade', pd.Series([0]*len(df_completo))).fillna(0)
         
@@ -60,7 +60,6 @@ def carregar_dados(arquivo):
             df_completo['Vencido'] = False
             
     else:
-        # CORREÇÃO 1: Evita enviar None para o Plotly inicializando com strings e zeros
         df_completo = df_layout.copy()
         df_completo['Status'] = 'Vazio'
         df_completo['Vencido'] = False
@@ -82,6 +81,11 @@ st.sidebar.header("🔍 2. Filtros e Visualização")
 
 mostrar_estrutura = st.sidebar.toggle("Mostrar Estrutura (Porta-Paletes Vazios)", value=True)
 
+# ---> FILTRO DE ÁREA DE VOLTA AQUI <---
+areas_disponiveis = [a for a in df["Área_Exibicao"].unique() if str(a) != "nan" and str(a) != "Desconhecido"]
+areas_disponiveis.sort() # Deixa em ordem alfabética para facilitar
+area_pesquisa = st.sidebar.selectbox("Pesquisa por Área de Armazenagem", options=["Todas"] + areas_disponiveis)
+
 produto_pesquisa = st.sidebar.text_input("Pesquisa por Produto (Código)")
 endereco_pesquisa = st.sidebar.text_input("Pesquisa por Endereço (ex: 025-071-040-001)")
 
@@ -99,6 +103,10 @@ df_filtrado = df.copy()
 
 if not mostrar_estrutura:
     df_filtrado = df_filtrado[df_filtrado['Status'] == 'Ocupado']
+
+# Aplicação do filtro de Área
+if area_pesquisa != "Todas":
+    df_filtrado = df_filtrado[df_filtrado["Área_Exibicao"] == area_pesquisa]
 
 if produto_pesquisa:
     df_filtrado = df_filtrado[(df_filtrado["Produto"].astype(str).str.contains(produto_pesquisa, na=False)) | (df_filtrado['Status'] == 'Vazio')]
@@ -145,9 +153,6 @@ for trace in fig_3d.data:
         trace.marker.size = 6 
     else:
         df_trace = df_filtrado[df_filtrado['Cor_Plot'] == nome_legenda]
-        
-        # CORREÇÃO 2: O Plotly 3D aceita array para CORES da borda, mas NÃO aceita array para WIDTH.
-        # Portanto, enviamos um width fixo de 4, mas usamos rgba(0,0,0,0) (transparente) para ocultar a borda de quem NÃO está vencido.
         line_colors = ['red' if v else 'rgba(0,0,0,0)' for v in df_trace['Vencido']]
         
         trace.marker.line = dict(color=line_colors, width=4) 
