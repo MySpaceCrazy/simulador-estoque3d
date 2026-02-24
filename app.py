@@ -37,7 +37,6 @@ def carregar_dados(arquivo):
     )
     
     # Cálculo para a Visão Micro (Dentro de 1 Corredor)
-    # Lado Par fica em Y=1, Lado Ímpar fica em Y=-1
     df_layout['Y_Micro'] = df_layout['Coluna'].apply(lambda x: 1 if x % 2 == 0 else -1)
     
     df_layout['Área_Exibicao'] = df_layout['Área armazmto.'].fillna('Desconhecido')
@@ -159,6 +158,11 @@ with graf_col2:
         fig_bar.update_layout(yaxis={'categoryorder':'total ascending'}, height=300, margin=dict(t=10, b=0, l=0, r=0))
         st.plotly_chart(fig_bar, use_container_width=True)
 
+if df_filtrado.empty:
+    st.warning("Nenhum dado para exibir com os filtros atuais no mapa 3D.")
+    st.stop()
+
+
 # ==========================================
 # ABAS DE VISUALIZAÇÃO 3D
 # ==========================================
@@ -169,6 +173,10 @@ paleta_segura = ['#1f77b4', '#2ca02c', '#ff7f0e', '#9467bd', '#8c564b', '#17becf
 mapa_cores = {' ESTRUTURA VAZIA': 'gray'}
 for i, area in enumerate(areas_disponiveis):
     mapa_cores[area] = paleta_segura[i % len(paleta_segura)]
+
+# INICIALIZAÇÃO SEGURA DOS EVENTOS (Previne o erro ao filtrar tudo)
+evento_macro = None
+evento_micro = None
 
 # --- ABA 1: VISÃO MACRO (Galpão Inteiro) ---
 with aba_macro:
@@ -225,19 +233,16 @@ with aba_micro:
             if nome_legenda == ' ESTRUTURA VAZIA':
                 trace.marker.color = 'rgba(150, 150, 150, 0.8)'
                 trace.marker.symbol = 'square-open' 
-                trace.marker.size = 12 # Bem maior na visão micro
+                trace.marker.size = 12 
                 trace.marker.line = dict(width=3)
             else:
                 df_trace = df_corredor[df_corredor['Cor_Plot'] == nome_legenda]
                 line_colors = ['red' if v else 'rgba(0,0,0,1)' for v in df_trace['Vencido']]
                 trace.marker.line = dict(color=line_colors, width=4) 
                 trace.marker.symbol = 'square'
-                trace.marker.size = 14 # Paletes grandes
+                trace.marker.size = 14 
 
-        # O SEGREDO DO VISUAL "CLEAN": Desligando todos os eixos e grades
         eixo_invisivel = dict(showbackground=False, showgrid=False, showline=False, showticklabels=False, title='')
-        
-        # Ajustando a proporção para parecer uma estante real (comprida no X, apertada no Y)
         tamanho_x = max(2, len(df_corredor['Coluna'].unique()) * 0.1)
 
         fig_micro.update_layout(
@@ -254,11 +259,17 @@ with aba_micro:
 
 
 # ==========================================
-# PAINEL DE DETALHES DO CLIQUE (Funciona para as duas abas)
+# PAINEL DE DETALHES DO CLIQUE SEGURA
 # ==========================================
-evento_ativo = evento_macro if (evento_macro and len(evento_macro.selection.points) > 0) else evento_micro
+evento_ativo = None
 
-if evento_ativo and len(evento_ativo.selection.points) > 0:
+# Verifica de qual gráfico veio o clique
+if evento_macro and len(evento_macro.selection.points) > 0:
+    evento_ativo = evento_macro
+elif evento_micro and len(evento_micro.selection.points) > 0:
+    evento_ativo = evento_micro
+
+if evento_ativo:
     ponto_clicado = evento_ativo.selection.points[0]
     endereco_clicado = ponto_clicado["hovertext"]
     
