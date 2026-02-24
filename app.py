@@ -153,7 +153,7 @@ for trace in fig_3d.data:
         trace.marker.size = 6 
     else:
         df_trace = df_filtrado[df_filtrado['Cor_Plot'] == nome_legenda]
-        line_colors = ['yellow' if v else 'rgba(0,0,0,0)' for v in df_trace['Vencido']]
+        line_colors = ['red' if v else 'rgba(0,0,0,0)' for v in df_trace['Vencido']]
         
         trace.marker.line = dict(color=line_colors, width=4) 
         trace.marker.symbol = 'square'
