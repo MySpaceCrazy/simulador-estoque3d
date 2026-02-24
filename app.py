@@ -1,150 +1,142 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
 from datetime import datetime
 
-# Configuração da página para ocupar toda a tela
 st.set_page_config(page_title="Simulador de Estoque 3D", layout="wide")
 
-st.title("📦 Simulador de Estoque 3D")
+st.title("📦 Simulador de Estoque 3D - CD Passo Fundo")
 
-# 1. Função para carregar e tratar os dados
+# 1. Função para carregar a Malha e cruzar com o Estoque
 @st.cache_data
 def carregar_dados():
-    # Simulando a carga dos dados (futuramente pd.read_excel('seu_arquivo.xlsx'))
-    dados_mock = pd.DataFrame({
-        "Posição no depósito": ["020-001-010-001", "020-001-020-001", "020-002-010-001", "021-001-010-001", "021-002-010-002"],
-        "UC": ["10001", "10002", "10003", "10004", "10005"],
-        "Produto": ["10041398", "8593", "10001226", "10041398", "9999"],
-        "Descrição produto": ["ESFOLIANTE", "SABONETE", "ENXAGUANTE", "ESFOLIANTE", "SHAMPOO"],
-        "Vencimento": pd.to_datetime(["2029-01-01", "2023-12-31", "2027-12-30", "2025-06-01", "2023-01-01"]),
-        "Quantidade": [240, 2232, 72, 100, 50],
-        "UMB": ["UN", "UN", "UN", "UN", "UN"],
-        "Área": ["PERF", "PERF", "FARM", "PERF", "COSM"],
-        "Tp. Posição depósito": ["P080", "P136", "P080", "P080", "P080"]
+    # A. Carregar o ESQUELETO (Layout do Galpão)
+    try:
+        # Lê o CSV que você me enviou. Certifique-se de que o nome está correto na sua pasta!
+        df_layout = pd.read_csv("EXPORT_20260224_122851.xlsx - Data.csv")
+    except FileNotFoundError:
+        st.error("Arquivo de layout não encontrado. Coloque o CSV na mesma pasta do app.py.")
+        return pd.DataFrame()
+
+    # O CSV já tem as colunas separadas, vamos só renomeá-las para facilitar
+    df_layout = df_layout.rename(columns={
+        'Corr.pos.dep.': 'Corredor',
+        'Col.posição depósito': 'Coluna',
+        'Nível pos.dep.': 'Nível'
     })
     
-    # --- A ADIÇÃO NOVA COMEÇA AQUI ---
-    # Quebrar a string do endereço em 4 novas colunas
-    dados_mock[['Corredor', 'Coluna', 'Nível', 'Posição']] = dados_mock['Posição no depósito'].str.split('-', expand=True)
+    # Converter para números (para o gráfico 3D)
+    df_layout['Corredor'] = pd.to_numeric(df_layout['Corredor'])
+    df_layout['Coluna'] = pd.to_numeric(df_layout['Coluna'])
+    df_layout['Nível'] = pd.to_numeric(df_layout['Nível'])
+
+    # B. Carregar o ESTOQUE (Mock por enquanto, peguei endereços reais do seu CSV)
+    dados_estoque = pd.DataFrame({
+        "Posição no depósito": ["025-071-040-001", "025-073-010-001", "001-053-020-001", "001-053-030-001"],
+        "UC": ["10001", "10002", "10003", "10004"],
+        "Produto": ["10041398", "8593", "10001226", "99999"],
+        "Descrição produto": ["ESFOLIANTE", "SABONETE", "ENXAGUANTE", "SHAMPOO"],
+        "Vencimento": pd.to_datetime(["2029-01-01", "2023-12-31", "2027-12-30", "2023-01-01"]),
+        "Quantidade": [240, 2232, 72, 100],
+        "Área_Estoque": ["PERF", "PERF", "FARM", "COSM"] # Mudei o nome para não conflitar com a Área do layout
+    })
+
+    # C. CRUZAR OS DADOS (Left Join)
+    # Mantém todos os endereços do layout e preenche com o estoque onde houver
+    df_completo = pd.merge(df_layout, dados_estoque, on="Posição no depósito", how="left")
+
+    # D. Identificar o que é Vazio e o que está Ocupado
+    # Se não tem 'Produto', a Área de Exibição vira 'VAZIO'
+    df_completo['Área_Exibicao'] = df_completo['Área_Estoque'].fillna('VAZIO')
+    df_completo['Status'] = df_completo['Produto'].apply(lambda x: 'Ocupado' if pd.notna(x) else 'Vazio')
     
-    # Transformar as novas colunas em números para o gráfico 3D
-    dados_mock['Corredor'] = pd.to_numeric(dados_mock['Corredor'])
-    dados_mock['Coluna'] = pd.to_numeric(dados_mock['Coluna'])
-    dados_mock['Nível'] = pd.to_numeric(dados_mock['Nível'])
-    dados_mock['Posição'] = pd.to_numeric(dados_mock['Posição'])
-    # --- A ADIÇÃO NOVA TERMINA AQUI ---
-    
-    return dados_mock
+    # Lógica de Vencimento
+    hoje = pd.Timestamp.today()
+    df_completo['Vencido'] = (df_completo['Vencimento'] < hoje) & (df_completo['Status'] == 'Ocupado')
+
+    return df_completo
 
 df = carregar_dados()
 
-# 2. Barra Lateral para Pesquisas e Filtros
-st.sidebar.header("🔍 Pesquisas Detalhadas")
+if df.empty:
+    st.stop() # Para a execução se não achar o arquivo
 
-# Filtro por Produto
+# 2. Barra Lateral para Filtros
+st.sidebar.header("🔍 Pesquisas Detalhadas")
 produto_pesquisa = st.sidebar.text_input("Pesquisa por Produto (Reduzido)")
 
-# Filtro por Área
-areas_disponiveis = df["Área"].unique()
-area_pesquisa = st.sidebar.selectbox("Pesquisa por Área", options=["Todas"] + list(areas_disponiveis))
+# Lista de áreas tira o "VAZIO" para não sujar o filtro
+areas_disponiveis = [a for a in df["Área_Exibicao"].unique() if a != "VAZIO"]
+area_pesquisa = st.sidebar.selectbox("Pesquisa por Área", options=["Todas"] + areas_disponiveis)
 
-# Filtro por Vencimento
-vencimento_pesquisa = st.sidebar.date_input("Pesquisa por Vencimento", value=None)
+endereco_pesquisa = st.sidebar.text_input("Pesquisa por Endereço (ex: 025-071-040-001)")
 
-# Filtro por Endereço
-endereco_pesquisa = st.sidebar.text_input("Pesquisa por Endereço (ex: 020-001-010-001)")
-
-# Aplicar os filtros ao DataFrame
+# Aplicar filtros
 df_filtrado = df.copy()
 if produto_pesquisa:
+    # Se pesquisar produto, apaga o resto do galpão
     df_filtrado = df_filtrado[df_filtrado["Produto"] == produto_pesquisa]
 if area_pesquisa != "Todas":
-    df_filtrado = df_filtrado[df_filtrado["Área"] == area_pesquisa]
-if vencimento_pesquisa:
-    df_filtrado = df_filtrado[df_filtrado["Vencimento"].dt.date == vencimento_pesquisa]
+    # Aqui mostramos a área pesquisada E os vazios para manter a referência visual (opcional)
+    df_filtrado = df_filtrado[(df_filtrado["Área_Exibicao"] == area_pesquisa) | (df_filtrado["Área_Exibicao"] == 'VAZIO')]
 if endereco_pesquisa:
     df_filtrado = df_filtrado[df_filtrado["Posição no depósito"] == endereco_pesquisa]
 
-# 3. Seção de Dashboards (KPIs)
-st.markdown("### 📊 Indicadores Principais")
-col1, col2 = st.columns(2)
 
-with col1:
-    estoque_total = df_filtrado["Quantidade"].sum()
-    st.metric("Estoque Total (Unidades)", f"{estoque_total:,.0f}")
+# 3. Simulador 3D do Depósito
+st.markdown("### 🏗️ Simulador 3D do Depósito - CD Passo Fundo")
 
-with col2:
-    produtos_diferentes = df_filtrado["Produto"].nunique()
-    st.metric("Produtos Diferentes", produtos_diferentes)
-
-# 4. Gráficos
-col3, col4 = st.columns(2)
-
-with col3:
-    st.markdown("**Posições Ocupadas vs Vazias**")
-    # Gráfico de rosca simulado (depois podemos calcular as vazias de verdade com base na malha do galpão)
-    fig_rosca = px.pie(values=[len(df_filtrado), 10], names=['Ocupadas', 'Vazias'], hole=0.5, 
-                       color_discrete_sequence=['#2E86C1', '#D6DBDF'])
-    st.plotly_chart(fig_rosca, use_container_width=True)
-
-with col4:
-    st.markdown("**Unidades por Área**")
-    fig_pizza = px.pie(df_filtrado, values='Quantidade', names='Área')
-    st.plotly_chart(fig_pizza, use_container_width=True)
-
-# 5. Simulador 3D do Depósito
-st.markdown("### 🏗️ Simulador 3D do Depósito")
-
-# 1. Identificar se o produto está vencido com base na data de hoje
-hoje = pd.Timestamp.today()
-df_filtrado['Vencido'] = df_filtrado['Vencimento'] < hoje
+# Vamos forçar a cor cinza transparente para os buracos 'VAZIO'
+mapa_cores = {'VAZIO': 'rgba(200, 200, 200, 0.1)'} # Cinza claro quase transparente
+# As outras áreas (PERF, FARM, etc.) o Plotly escolhe automaticamente cores vibrantes
 
 fig_3d = px.scatter_3d(
     df_filtrado, 
     x='Coluna', 
     y='Corredor', 
     z='Nível',
-    color='Área', 
+    color='Área_Exibicao', 
+    color_discrete_map=mapa_cores,
     hover_name='Posição no depósito',
     hover_data={
+        'Status': True,
         'Produto': True, 
-        'Descrição produto': True, 
         'Quantidade': True, 
-        'Vencimento': '|%d/%m/%Y',
-        'Vencido': True, # Adiciona a informação de status no popup do mouse
-        'Corredor': False, 
-        'Coluna': False, 
-        'Nível': False
+        'Vencido': True,
+        'Área_Exibicao': False,
+        'Corredor': False, 'Coluna': False, 'Nível': False
     },
-    title="Visão Espacial do Estoque (Contorno Vermelho = Vencido)"
+    title="Malha Completa do Galpão (Cinza = Vazio | Colorido = Ocupado)"
 )
 
-# 2. Ajustar o tamanho base dos paletes
-fig_3d.update_traces(marker=dict(size=10, symbol='square')) 
+# Ajuste do tamanho dos paletes. Como agora temos milhares, diminuímos um pouco o 'size' para não virar uma bagunça
+fig_3d.update_traces(marker=dict(size=4, symbol='square')) 
 
-# 3. Criar a lógica do contorno vermelho para os vencidos
+# Lógica da borda vermelha para os vencidos
 for trace in fig_3d.data:
     area_name = trace.name
-    # Pega os dados apenas da área atual do loop
-    df_trace = df_filtrado[df_filtrado['Área'] == area_name]
-    
-    # Se estiver vencido a borda é vermelha. Se não, é transparente (rgba com alpha 0)
+    if area_name == 'VAZIO':
+        continue # Não aplica borda em posições vazias
+        
+    df_trace = df_filtrado[df_filtrado['Área_Exibicao'] == area_name]
     line_colors = ['red' if v else 'rgba(0,0,0,0)' for v in df_trace['Vencido']]
-    
-    # A correção está aqui: passamos a lista de cores, mas a espessura (width) é um número fixo!
-    trace.marker.line = dict(color=line_colors, width=5)
+    trace.marker.line = dict(color=line_colors, width=4)
 
-# 4. Ajustes finais da câmera e eixos
-fig_3d.update_layout(scene=dict(
-    xaxis_title='Coluna (Largura)',
-    yaxis_title='Corredor (Profundidade)',
-    zaxis_title='Nível (Altura)'
-))
+fig_3d.update_layout(
+    scene=dict(
+        xaxis_title='Coluna',
+        yaxis_title='Corredor',
+        zaxis_title='Nível',
+        aspectmode='data' # Isso faz o gráfico respeitar as proporções reais da planta!
+    ),
+    height=700 # Deixa o gráfico mais alto na tela
+)
 
 st.plotly_chart(fig_3d, use_container_width=True)
 
-# Exibição da tabela para verificação detalhada
-st.markdown("### 📋 Tabela de Dados")
-st.dataframe(df_filtrado)
+# Dashboards básicos apenas para produtos em estoque
+df_estoque_real = df_filtrado[df_filtrado['Status'] == 'Ocupado']
+st.markdown("### 📊 Indicadores Principais")
+col1, col2 = st.columns(2)
+col1.metric("Posições Ocupadas", len(df_estoque_real))
+col2.metric("Posições Vazias", len(df_filtrado[df_filtrado['Status'] == 'Vazio']))
