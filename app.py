@@ -12,20 +12,16 @@ st.title("📦 Simulador de Estoque 3D - CD Passo Fundo")
 def carregar_dados():
     # A. Carregar o ESQUELETO (Layout do Galpão)
     try:
-        # Lê o CSV que você me enviou. Certifique-se de que o nome está correto na sua pasta!
+        # Lê o CSV mantendo o encoding para evitar erros nos acentos
         df_layout = pd.read_csv("EXPORT_20260224_122851.xlsx - Data.csv", encoding="latin-1")
     except FileNotFoundError:
         st.error("Arquivo de layout não encontrado. Coloque o CSV na mesma pasta do app.py.")
         return pd.DataFrame()
 
-    # O CSV já tem as colunas separadas, vamos só renomeá-las para facilitar
-    df_layout = df_layout.rename(columns={
-        'Corr.pos.dep.': 'Corredor',
-        'Col.posição depósito': 'Coluna',
-        'Nível pos.dep.': 'Nível'
-    })
+    # SOLUÇÃO: Em vez de renomear as colunas do CSV, nós quebramos a string do endereço!
+    df_layout[['Corredor', 'Coluna', 'Nível', 'Posição_Extra']] = df_layout['Posição no depósito'].str.split('-', expand=True)
     
-    # Converter para números (para o gráfico 3D)
+    # Converter para números para desenhar no gráfico 3D
     df_layout['Corredor'] = pd.to_numeric(df_layout['Corredor'])
     df_layout['Coluna'] = pd.to_numeric(df_layout['Coluna'])
     df_layout['Nível'] = pd.to_numeric(df_layout['Nível'])
@@ -38,7 +34,7 @@ def carregar_dados():
         "Descrição produto": ["ESFOLIANTE", "SABONETE", "ENXAGUANTE", "SHAMPOO"],
         "Vencimento": pd.to_datetime(["2029-01-01", "2023-12-31", "2027-12-30", "2023-01-01"]),
         "Quantidade": [240, 2232, 72, 100],
-        "Área_Estoque": ["PERF", "PERF", "FARM", "COSM"] # Mudei o nome para não conflitar com a Área do layout
+        "Área_Estoque": ["PERF", "PERF", "FARM", "COSM"] 
     })
 
     # C. CRUZAR OS DADOS (Left Join)
