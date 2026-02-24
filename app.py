@@ -11,7 +11,6 @@ st.title("📦 Simulador de Estoque 3D - CD Passo Fundo")
 st.sidebar.header("📁 1. Carga de Dados")
 arquivo_estoque = st.sidebar.file_uploader("Faça upload do Estoque (Excel ou CSV)", type=["xlsx", "csv"])
 
-# 1. Função para carregar a Malha e cruzar com o Estoque
 @st.cache_data
 def carregar_dados(arquivo):
     # A. Carregar o ESQUELETO (Layout do Galpão - Fixo)
@@ -25,33 +24,30 @@ def carregar_dados(arquivo):
     df_layout['Corredor'] = pd.to_numeric(df_layout['Corredor'])
     df_layout['Coluna'] = pd.to_numeric(df_layout['Coluna'])
     df_layout['Nível'] = pd.to_numeric(df_layout['Nível'])
+    
+    # GARANTIA 1: Usa o Tp.posição depósito da base fixa para as cores
+    df_layout['Área_Exibicao'] = df_layout['Tp.posição depósito'].fillna('Desconhecido')
 
     # B. Carregar o ESTOQUE DO USUÁRIO
     if arquivo is not None:
         if arquivo.name.endswith('.csv'):
-            # Usa engine='python' e sep=None para descobrir sozinho se é vírgula ou ponto e vírgula
             try:
                 dados_estoque = pd.read_csv(arquivo, sep=None, engine='python', encoding='utf-8')
             except UnicodeDecodeError:
-                arquivo.seek(0) # Volta o arquivo para o começo para tentar de novo
+                arquivo.seek(0)
                 dados_estoque = pd.read_csv(arquivo, sep=None, engine='python', encoding='latin-1')
         else:
-            # Lê o Excel agora que o openpyxl está instalado
             dados_estoque = pd.read_excel(arquivo)
             
-        # Padroniza a coluna de Vencimento caso venha com nomes diferentes
+        # Padroniza a coluna de Vencimento caso o sistema gere com nome diferente
         if 'Data do vencimento' in dados_estoque.columns:
             dados_estoque = dados_estoque.rename(columns={'Data do vencimento': 'Vencimento'})
             
-        # Converter data de vencimento se ela existir no arquivo
         if 'Vencimento' in dados_estoque.columns:
             dados_estoque['Vencimento'] = pd.to_datetime(dados_estoque['Vencimento'], errors='coerce')
             
         # C. CRUZAR OS DADOS (Left Join)
         df_completo = pd.merge(df_layout, dados_estoque, on="Posição no depósito", how="left")
-        
-        # Identificar o que é Vazio e o que está Ocupado
-        df_completo['Área_Exibicao'] = df_completo.get('Tipo de depósito', pd.Series([None]*len(df_completo))).fillna('VAZIO')
         df_completo['Status'] = df_completo.get('Produto', pd.Series([None]*len(df_completo))).apply(lambda x: 'Ocupado' if pd.notna(x) else 'Vazio')
         
         hoje = pd.Timestamp.today()
@@ -61,17 +57,17 @@ def carregar_dados(arquivo):
             df_completo['Vencido'] = False
             
     else:
-        # Se o usuário ainda não subiu o arquivo, mostra a malha toda vazia
+        # Se vazio, monta a malha pura
         df_completo = df_layout.copy()
-        df_completo['Área_Exibicao'] = 'VAZIO'
         df_completo['Status'] = 'Vazio'
         df_completo['Vencido'] = False
-        df_completo['Produto'] = None
-        df_completo['Quantidade'] = None
+        df_completo['Vencimento'] = pd.NaT
+
+    # Cria uma coluna corigatória pro Plotly separar o que é Vazio e o que tem Cor
+    df_completo['Cor_Plot'] = df_completo.apply(lambda row: ' ESTRUTURA VAZIA' if row['Status'] == 'Vazio' else row['Área_Exibicao'], axis=1)
 
     return df_completo
 
-# Passamos o arquivo upado para a função
 df = carregar_dados(arquivo_estoque)
 
 if df.empty:
@@ -80,70 +76,85 @@ if df.empty:
 # --- BARRA LATERAL: FILTROS E VISUALIZAÇÃO ---
 st.sidebar.header("🔍 2. Filtros e Visualização")
 
-# O pulo do gato para melhorar a visualização:
-mostrar_vazios = st.sidebar.toggle("Mostrar Posições Vazias na Planta?", value=False)
+mostrar_estrutura = st.sidebar.toggle("Mostrar Estrutura (Porta-Paletes Vazios)", value=True)
 
 produto_pesquisa = st.sidebar.text_input("Pesquisa por Produto (Código)")
-areas_disponiveis = [a for a in df["Área_Exibicao"].unique() if a != "VAZIO"]
-area_pesquisa = st.sidebar.selectbox("Pesquisa por Área", options=["Todas"] + areas_disponiveis)
 endereco_pesquisa = st.sidebar.text_input("Pesquisa por Endereço (ex: 025-071-040-001)")
+
+# GARANTIA 2: Filtro por Data de Vencimento
+df_ocupado = df[df['Status'] == 'Ocupado']
+if 'Vencimento' in df.columns and len(df_ocupado) > 0:
+    datas_unicas = df_ocupado['Vencimento'].dt.date.dropna().unique().tolist()
+    datas_unicas.sort()
+else:
+    datas_unicas = []
+
+data_pesquisa = st.sidebar.selectbox("Pesquisa por Data de Vencimento", options=["Todas"] + datas_unicas)
 
 # Aplicar filtros
 df_filtrado = df.copy()
 
-if not mostrar_vazios:
-    # Remove as posições vazias da visualização 3D para limpar a tela
+if not mostrar_estrutura:
     df_filtrado = df_filtrado[df_filtrado['Status'] == 'Ocupado']
 
 if produto_pesquisa:
-    df_filtrado = df_filtrado[df_filtrado["Produto"].astype(str).str.contains(produto_pesquisa, na=False)]
-if area_pesquisa != "Todas":
-    # Se estiver filtrando por área, e o usuário quiser ver os vazios, mantemos os vazios na tela
-    if mostrar_vazios:
-        df_filtrado = df_filtrado[(df_filtrado["Área_Exibicao"] == area_pesquisa) | (df_filtrado["Área_Exibicao"] == 'VAZIO')]
-    else:
-        df_filtrado = df_filtrado[df_filtrado["Área_Exibicao"] == area_pesquisa]
+    # Mostra o produto E a estrutura para dar contexto geográfico no galpão
+    df_filtrado = df_filtrado[(df_filtrado["Produto"].astype(str).str.contains(produto_pesquisa, na=False)) | (df_filtrado['Status'] == 'Vazio')]
 if endereco_pesquisa:
-    df_filtrado = df_filtrado[df_filtrado["Posição no depósito"].str.contains(endereco_pesquisa, na=False)]
+    df_filtrado = df_filtrado[(df_filtrado["Posição no depósito"].str.contains(endereco_pesquisa, na=False)) | (df_filtrado['Status'] == 'Vazio')]
+if data_pesquisa != "Todas":
+    # Aqui também mantemos a estrutura vazia de fundo (se o toggle estiver ativo) para o usuário saber onde a data está fisicamente
+    df_filtrado = df_filtrado[(df_filtrado['Vencimento'].dt.date == data_pesquisa) | (df_filtrado['Status'] == 'Vazio')]
+
+# Para evitar travar o navegador se a pesquisa retornar só vazios:
+if not mostrar_estrutura and df_filtrado.empty:
+    st.warning("Nenhum palete encontrado com esses filtros.")
+    st.stop()
+
 
 # 3. Simulador 3D do Depósito
 st.markdown("### 🏗️ Simulador 3D do Depósito - CD Passo Fundo")
 
 if arquivo_estoque is None:
-    st.info("👈 Faça o upload da sua planilha de estoque na barra lateral para popular o galpão.")
-
-# Definir as cores (Vazio fica transparente, ocupados pegam cores dinâmicas)
-mapa_cores = {'VAZIO': 'rgba(200, 200, 200, 0.05)'}
+    st.info("👈 Faça o upload da sua planilha de estoque na barra lateral para popular os porta-paletes.")
 
 fig_3d = px.scatter_3d(
     df_filtrado, 
     x='Coluna', 
     y='Corredor', 
     z='Nível',
-    color='Área_Exibicao', 
-    color_discrete_map=mapa_cores,
+    color='Cor_Plot', 
     hover_name='Posição no depósito',
     hover_data={
         'Status': True,
         'Produto': True, 
         'Quantidade': True, 
         'Vencido': True,
-        'Área_Exibicao': False,
+        'Cor_Plot': False,
         'Corredor': False, 'Coluna': False, 'Nível': False
     }
 )
 
-fig_3d.update_traces(marker=dict(size=4, symbol='square')) 
-
-# Lógica da borda vermelha para os vencidos
+# GARANTIA 3: Efeito visual Porta-Palete vs Palete Colorido
 for trace in fig_3d.data:
-    area_name = trace.name
-    if area_name == 'VAZIO':
-        continue 
+    nome_legenda = trace.name
+    
+    if nome_legenda == ' ESTRUTURA VAZIA':
+        # ESTRUTURA DO RACK (Maior, fundo transparente, borda cinza escura)
+        trace.marker.color = 'rgba(255, 255, 255, 0.0)' 
+        trace.marker.line = dict(color='rgba(150, 150, 150, 0.6)', width=2) 
+        trace.marker.symbol = 'square'
+        trace.marker.size = 6 
+    else:
+        # PALETE OCUPADO COM ESTOQUE (Sólido, colorido, um pouco menor para "caber dentro" do rack)
+        df_trace = df_filtrado[df_filtrado['Cor_Plot'] == nome_legenda]
+        # Borda vermelha grossa se vencido, senão borda preta fina
+        line_colors = ['red' if v else 'black' for v in df_trace['Vencido']]
+        line_widths = [5 if v else 1 for v in df_trace['Vencido']]
         
-    df_trace = df_filtrado[df_filtrado['Área_Exibicao'] == area_name]
-    line_colors = ['red' if v else 'rgba(0,0,0,0)' for v in df_trace['Vencido']]
-    trace.marker.line = dict(color=line_colors, width=4)
+        trace.marker.line = dict(color=line_colors, width=line_widths)
+        trace.marker.symbol = 'square'
+        trace.marker.size = 4.5 # Um pouquinho menor que o tamanho 6 da estrutura vazia
 
 fig_3d.update_layout(
     scene=dict(
@@ -153,14 +164,16 @@ fig_3d.update_layout(
         aspectmode='data' 
     ),
     height=750,
-    margin=dict(l=0, r=0, b=0, t=0) # Tira as margens em branco do gráfico
+    margin=dict(l=0, r=0, b=0, t=0),
+    legend_title_text='Legenda do Depósito'
 )
 
 st.plotly_chart(fig_3d, use_container_width=True)
 
 # Dashboards
-df_estoque_real = df[df['Status'] == 'Ocupado'] # Pega do DF original para não ser afetado pelo filtro de visualização
+df_estoque_real = df[df['Status'] == 'Ocupado']
 st.markdown("### 📊 Indicadores Principais")
-col1, col2 = st.columns(2)
+col1, col2, col3 = st.columns(3)
 col1.metric("Total de Posições Ocupadas", len(df_estoque_real))
 col2.metric("Total de Posições Vazias", len(df[df['Status'] == 'Vazio']))
+col3.metric("Paletes Vencidos", len(df[df['Vencido'] == True]))
