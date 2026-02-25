@@ -27,11 +27,84 @@ def criar_caixa(x, y, z, dx, dy, dz, cor, opacity=1.0):
 
 st.title("📦 Simulador de Estoque 3D - CD Passo Fundo")
 
+# --- BARRA LATERAL: UPLOAD DE ARQUIVO ---
+st.sidebar.header("📁 1. Carga de Dados")
+arquivo_estoque = st.sidebar.file_uploader("Faça upload do Estoque (Excel ou CSV)", type=["xlsx", "csv"])
+
+@st.cache_data
+def carregar_dados(arquivo):
+    try:
+        df_layout = pd.read_csv("EXPORT_20260224_122851.xlsx - Data.csv", encoding="latin-1", sep=";")
+    except FileNotFoundError:
+        st.error("Arquivo de layout não encontrado na pasta.")
+        return pd.DataFrame()
+
+    df_layout[['Corredor', 'Coluna', 'Nível', 'Posição_Extra']] = df_layout['Posição no depósito'].str.split('-', expand=True)
+    df_layout['Corredor'] = pd.to_numeric(df_layout['Corredor'])
+    df_layout['Coluna'] = pd.to_numeric(df_layout['Coluna'])
+    df_layout['Nível'] = pd.to_numeric(df_layout['Nível'])
+    
+    # Cálculo Y para Visão Macro
+    df_layout['Y_Plot'] = df_layout['Corredor'] * 3
+    df_layout['Y_Plot'] = df_layout.apply(lambda row: row['Y_Plot'] + 0.8 if row['Coluna'] % 2 == 0 else row['Y_Plot'] - 0.8, axis=1)
+    
+    # Cálculo Y para Visão Micro (Ímpar -1, Par 1)
+    df_layout['Y_Micro'] = df_layout['Coluna'].apply(lambda x: 1 if x % 2 == 0 else -1)
+    df_layout['Área_Exibicao'] = df_layout['Área armazmto.'].fillna('Desconhecido')
+
+    if arquivo is not None:
+        if arquivo.name.endswith('.csv'):
+            try:
+                dados_estoque = pd.read_csv(arquivo, sep=None, engine='python', encoding='utf-8')
+            except UnicodeDecodeError:
+                arquivo.seek(0)
+                dados_estoque = pd.read_csv(arquivo, sep=None, engine='python', encoding='latin-1')
+        else:
+            dados_estoque = pd.read_excel(arquivo)
+            
+        if 'Data do vencimento' in dados_estoque.columns:
+            dados_estoque = dados_estoque.rename(columns={'Data do vencimento': 'Vencimento'})
+            
+        if 'Vencimento' in dados_estoque.columns:
+            dados_estoque['Vencimento'] = pd.to_datetime(dados_estoque['Vencimento'], errors='coerce')
+            
+        df_completo = pd.merge(df_layout, dados_estoque, on="Posição no depósito", how="left")
+        
+        df_completo['Produto'] = df_completo.get('Produto', pd.Series(['-']*len(df_completo))).fillna('-')
+        df_completo['Quantidade'] = df_completo.get('Quantidade', pd.Series([0]*len(df_completo))).fillna(0)
+        df_completo['Descrição produto'] = df_completo.get('Descrição produto', pd.Series(['-']*len(df_completo))).fillna('-')
+        df_completo['Unidade comercial'] = df_completo.get('Unidade comercial', pd.Series(['-']*len(df_completo))).fillna('-')
+        
+        df_completo['Status'] = df_completo['Produto'].apply(lambda x: 'Ocupado' if str(x) != '-' else 'Vazio')
+        
+        hoje = pd.Timestamp.today()
+        if 'Vencimento' in df_completo.columns:
+            df_completo['Vencido'] = (df_completo['Vencimento'] < hoje) & (df_completo['Status'] == 'Ocupado')
+        else:
+            df_completo['Vencido'] = False
+    else:
+        df_completo = df_layout.copy()
+        df_completo['Status'] = 'Vazio'
+        df_completo['Vencido'] = False
+        df_completo['Vencimento'] = pd.NaT
+        df_completo['Produto'] = '-'
+        df_completo['Descrição produto'] = '-'
+        df_completo['Unidade comercial'] = '-'
+        df_completo['Quantidade'] = 0
+
+    df_completo['Cor_Plot'] = df_completo.apply(lambda row: ' ESTRUTURA VAZIA' if row['Status'] == 'Vazio' else str(row['Área_Exibicao']), axis=1)
+    return df_completo
+
+df = carregar_dados(arquivo_estoque)
+
+if df.empty:
+    st.stop()
+
 # =====================================================
 # DASHBOARD RESUMO (INDICADORES DO CD)
 # =====================================================
 
-if 'df' in locals() and not df.empty:
+if not df.empty:
 
     st.markdown("### 📊 Indicadores Gerais do Armazém")
 
@@ -135,80 +208,6 @@ if 'df' in locals() and not df.empty:
         st.plotly_chart(fig_area, use_container_width=True)
 
     st.markdown("---")
-
-
-# --- BARRA LATERAL: UPLOAD DE ARQUIVO ---
-st.sidebar.header("📁 1. Carga de Dados")
-arquivo_estoque = st.sidebar.file_uploader("Faça upload do Estoque (Excel ou CSV)", type=["xlsx", "csv"])
-
-@st.cache_data
-def carregar_dados(arquivo):
-    try:
-        df_layout = pd.read_csv("EXPORT_20260224_122851.xlsx - Data.csv", encoding="latin-1", sep=";")
-    except FileNotFoundError:
-        st.error("Arquivo de layout não encontrado na pasta.")
-        return pd.DataFrame()
-
-    df_layout[['Corredor', 'Coluna', 'Nível', 'Posição_Extra']] = df_layout['Posição no depósito'].str.split('-', expand=True)
-    df_layout['Corredor'] = pd.to_numeric(df_layout['Corredor'])
-    df_layout['Coluna'] = pd.to_numeric(df_layout['Coluna'])
-    df_layout['Nível'] = pd.to_numeric(df_layout['Nível'])
-    
-    # Cálculo Y para Visão Macro
-    df_layout['Y_Plot'] = df_layout['Corredor'] * 3
-    df_layout['Y_Plot'] = df_layout.apply(lambda row: row['Y_Plot'] + 0.8 if row['Coluna'] % 2 == 0 else row['Y_Plot'] - 0.8, axis=1)
-    
-    # Cálculo Y para Visão Micro (Ímpar -1, Par 1)
-    df_layout['Y_Micro'] = df_layout['Coluna'].apply(lambda x: 1 if x % 2 == 0 else -1)
-    df_layout['Área_Exibicao'] = df_layout['Área armazmto.'].fillna('Desconhecido')
-
-    if arquivo is not None:
-        if arquivo.name.endswith('.csv'):
-            try:
-                dados_estoque = pd.read_csv(arquivo, sep=None, engine='python', encoding='utf-8')
-            except UnicodeDecodeError:
-                arquivo.seek(0)
-                dados_estoque = pd.read_csv(arquivo, sep=None, engine='python', encoding='latin-1')
-        else:
-            dados_estoque = pd.read_excel(arquivo)
-            
-        if 'Data do vencimento' in dados_estoque.columns:
-            dados_estoque = dados_estoque.rename(columns={'Data do vencimento': 'Vencimento'})
-            
-        if 'Vencimento' in dados_estoque.columns:
-            dados_estoque['Vencimento'] = pd.to_datetime(dados_estoque['Vencimento'], errors='coerce')
-            
-        df_completo = pd.merge(df_layout, dados_estoque, on="Posição no depósito", how="left")
-        
-        df_completo['Produto'] = df_completo.get('Produto', pd.Series(['-']*len(df_completo))).fillna('-')
-        df_completo['Quantidade'] = df_completo.get('Quantidade', pd.Series([0]*len(df_completo))).fillna(0)
-        df_completo['Descrição produto'] = df_completo.get('Descrição produto', pd.Series(['-']*len(df_completo))).fillna('-')
-        df_completo['Unidade comercial'] = df_completo.get('Unidade comercial', pd.Series(['-']*len(df_completo))).fillna('-')
-        
-        df_completo['Status'] = df_completo['Produto'].apply(lambda x: 'Ocupado' if str(x) != '-' else 'Vazio')
-        
-        hoje = pd.Timestamp.today()
-        if 'Vencimento' in df_completo.columns:
-            df_completo['Vencido'] = (df_completo['Vencimento'] < hoje) & (df_completo['Status'] == 'Ocupado')
-        else:
-            df_completo['Vencido'] = False
-    else:
-        df_completo = df_layout.copy()
-        df_completo['Status'] = 'Vazio'
-        df_completo['Vencido'] = False
-        df_completo['Vencimento'] = pd.NaT
-        df_completo['Produto'] = '-'
-        df_completo['Descrição produto'] = '-'
-        df_completo['Unidade comercial'] = '-'
-        df_completo['Quantidade'] = 0
-
-    df_completo['Cor_Plot'] = df_completo.apply(lambda row: ' ESTRUTURA VAZIA' if row['Status'] == 'Vazio' else str(row['Área_Exibicao']), axis=1)
-    return df_completo
-
-df = carregar_dados(arquivo_estoque)
-
-if df.empty:
-    st.stop()
 
 # --- BARRA LATERAL: FILTROS GERAIS ---
 st.sidebar.header("🔍 2. Filtros Globais")
