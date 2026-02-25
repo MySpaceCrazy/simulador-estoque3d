@@ -418,11 +418,14 @@ with aba_macro:
             trace.marker.symbol = 'square-open' 
             trace.marker.size = 3 
         else:
-            df_trace = df_filtrado[df_filtrado['Cor_Plot'] == nome_legenda]
-            line_colors = ['red' if v else 'rgba(0,0,0,0)' for v in df_trace['Vencido']]
-            trace.marker.line = dict(color=line_colors, width=5) 
             trace.marker.symbol = 'square'
             trace.marker.size = 3.5 
+            
+            # MÁGICA AQUI: Pega a cor diretamente do dado embutido no hover_data (seguro contra crash)
+            if hasattr(trace, 'customdata') and trace.customdata is not None:
+                # O status 'Vencido' é a 4ª variável passada no hover_data (índice 3)
+                line_colors = ['red' if row[3] else 'rgba(0,0,0,0)' for row in trace.customdata]
+                trace.marker.line = dict(color=line_colors, width=5)
 
     fig_macro.update_layout(
         scene=dict(
@@ -477,18 +480,21 @@ with aba_micro:
         for trace in traces_paletes:
             nome_legenda = trace.name
             if nome_legenda == ' ESTRUTURA VAZIA':
-                # Palete vazio fica quase invisível, pois a estante de aço vai fazer o contorno
+                # Palete vazio fica quase invisível
                 trace.marker.color = 'rgba(255, 255, 255, 0.0)'
                 trace.marker.symbol = 'square-open' 
                 trace.marker.size = 1
                 trace.marker.line = dict(width=0)
             else:
-                # Paletes ocupados ficam como cubões sólidos
-                df_trace = df_corredor[df_corredor['Cor_Plot'] == nome_legenda]
-                line_colors = ['red' if v else 'rgba(0,0,0,1)' for v in df_trace['Vencido']]
-                trace.marker.line = dict(color=line_colors, width=4) 
+                # Paletes ocupados
                 trace.marker.symbol = 'square'
-                trace.marker.size = 22 # Tamanho gigante para parecer a caixa no rack
+                trace.marker.size = 22 # Tamanho gigante
+                trace.opacity = 0.92 
+                
+                # MÁGICA AQUI também
+                if hasattr(trace, 'customdata') and trace.customdata is not None:
+                    line_colors = ['red' if row[3] else 'rgba(0,0,0,1)' for row in trace.customdata]
+                    trace.marker.line = dict(color=line_colors, width=4)
 
                 trace.opacity = 0.92 # Micro transparência (profundidade visual)
 
