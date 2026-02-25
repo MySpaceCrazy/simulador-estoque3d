@@ -24,6 +24,32 @@ def criar_caixa(x, y, z, dx, dy, dz, cor, opacity=1.0):
         k=[2,3,1,5,6,7,6,7,4,1,2,3],
         color=cor, opacity=opacity, flatshading=True, hoverinfo='skip', showscale=False
     )
+# ==========================================
+# GERADOR DO MAPA DE CORES (ANTI-RERUN BUG)
+# ==========================================
+@st.cache_data(show_spinner=False)
+def gerar_mapa_cores(df):
+
+    paleta_segura = [
+        '#1f77b4', '#2ca02c', '#ff7f0e',
+        '#9467bd', '#8c564b', '#17becf',
+        '#e377c2', '#7f7f7f', '#bcbd22'
+    ]
+
+    mapa = {' ESTRUTURA VAZIA': 'gray'}
+
+    areas = [
+        a for a in df["Área_Exibicao"].unique()
+        if str(a) != "nan" and str(a) != "Desconhecido"
+    ]
+
+    areas.sort()
+
+    for i, area in enumerate(areas):
+        mapa[area] = paleta_segura[i % len(paleta_segura)]
+
+    return mapa
+
 
 st.title("📦 Simulador de Estoque 3D - CD Passo Fundo")
 
@@ -31,7 +57,17 @@ st.title("📦 Simulador de Estoque 3D - CD Passo Fundo")
 st.sidebar.header("📁 1. Carga de Dados")
 arquivo_estoque = st.sidebar.file_uploader("Faça upload do Estoque (Excel ou CSV)", type=["xlsx", "csv"])
 
-@st.cache_data
+# =====================================================
+# CONTROLE INTELIGENTE DE CACHE (limpa só quando muda arquivo)
+# =====================================================
+if "arquivo_anterior" not in st.session_state:
+    st.session_state.arquivo_anterior = None
+
+if arquivo_estoque != st.session_state.arquivo_anterior:
+    st.cache_data.clear()
+    st.session_state.arquivo_anterior = arquivo_estoque
+
+@st.cache_data(show_spinner=False)
 def carregar_dados(arquivo):
     try:
         df_layout = pd.read_csv("EXPORT_20260224_122851.xlsx - Data.csv", encoding="latin-1", sep=";")
@@ -100,114 +136,114 @@ df = carregar_dados(arquivo_estoque)
 if df.empty:
     st.stop()
 
+# CRIA MAPA DE CORES SEMPRE APÓS CARREGAR DF
+mapa_cores = gerar_mapa_cores(df)
+
 # =====================================================
 # DASHBOARD RESUMO (INDICADORES DO CD)
 # =====================================================
+st.markdown("### 📊 Indicadores Gerais do Armazém")
 
-if not df.empty:
+df_ocupado = df[df['Status'] == 'Ocupado']
+df_vazio = df[df['Status'] == 'Vazio']
 
-    st.markdown("### 📊 Indicadores Gerais do Armazém")
+total_posicoes = len(df)
+pos_ocupadas = len(df_ocupado)
+pos_vazias = len(df_vazio)
 
-    df_ocupado = df[df['Status'] == 'Ocupado']
-    df_vazio = df[df['Status'] == 'Vazio']
+# =====================================================
+# LAYOUT EM 3 COLUNAS
+# =====================================================
+col_g1, col_g2, col_g3 = st.columns(3)
 
-    total_posicoes = len(df)
-    pos_ocupadas = len(df_ocupado)
-    pos_vazias = len(df_vazio)
+# =====================================================
+# 1️⃣ GRÁFICO ROSCA — OCUPAÇÃO
+# =====================================================
+with col_g1:
 
-    # =====================================================
-    # LAYOUT EM 3 COLUNAS
-    # =====================================================
-    col_g1, col_g2, col_g3 = st.columns(3)
+    fig_ocupacao = go.Figure(data=[go.Pie(
+        labels=['Ocupadas', 'Vazias'],
+        values=[pos_ocupadas, pos_vazias],
+        hole=0.6,
+        textinfo='label+percent',
+        hovertemplate="<b>%{label}</b><br>Qtd: %{value}<extra></extra>",
+        marker=dict(colors=['#2ca02c', '#d3d3d3'])
+    )])
 
-    # =====================================================
-    # 1️⃣ GRÁFICO ROSCA — OCUPAÇÃO
-    # =====================================================
-    with col_g1:
+    fig_ocupacao.update_layout(
+        title=f"Ocupação do Armazém<br>{pos_ocupadas:,} / {total_posicoes:,} posições",
+        height=350,
+        margin=dict(t=60, b=0, l=0, r=0),
+        showlegend=False
+    )
 
-        fig_ocupacao = go.Figure(data=[go.Pie(
-            labels=['Ocupadas', 'Vazias'],
-            values=[pos_ocupadas, pos_vazias],
-            hole=0.6,
-            textinfo='label+percent',
-            hovertemplate="<b>%{label}</b><br>Qtd: %{value}<extra></extra>",
-            marker=dict(colors=['#2ca02c', '#d3d3d3'])
-        )])
+    st.plotly_chart(fig_ocupacao, use_container_width=True)
 
-        fig_ocupacao.update_layout(
-            title=f"Ocupação do Armazém<br>{pos_ocupadas:,} / {total_posicoes:,} posições",
-            height=350,
-            margin=dict(t=60, b=0, l=0, r=0),
-            showlegend=False
-        )
+# =====================================================
+# 2️⃣ TOP 5 PRODUTOS (BARRA HORIZONTAL)
+# =====================================================
+with col_g2:
 
-        st.plotly_chart(fig_ocupacao, use_container_width=True)
+    top5 = (
+        df_ocupado
+        .groupby('Produto')['Quantidade']
+        .sum()
+        .sort_values(ascending=False)
+        .head(5)
+        .reset_index()
+    )
 
-    # =====================================================
-    # 2️⃣ TOP 5 PRODUTOS (BARRA HORIZONTAL)
-    # =====================================================
-    with col_g2:
+    fig_top5 = px.bar(
+        top5,
+        x='Quantidade',
+        y='Produto',
+        orientation='h',
+        text='Quantidade',
+        title="Top 5 Produtos com Maior Estoque"
+    )
 
-        top5 = (
-            df_ocupado
-            .groupby('Produto')['Quantidade']
-            .sum()
-            .sort_values(ascending=False)
-            .head(5)
-            .reset_index()
-        )
+    fig_top5.update_layout(
+        height=350,
+        yaxis=dict(categoryorder='total ascending'),
+        margin=dict(t=60, b=0, l=0, r=0)
+    )
 
-        fig_top5 = px.bar(
-            top5,
-            x='Quantidade',
-            y='Produto',
-            orientation='h',
-            text='Quantidade',
-            title="Top 5 Produtos com Maior Estoque"
-        )
+    st.plotly_chart(fig_top5, use_container_width=True)
 
-        fig_top5.update_layout(
-            height=350,
-            yaxis=dict(categoryorder='total ascending'),
-            margin=dict(t=60, b=0, l=0, r=0)
-        )
+# =====================================================
+# 3️⃣ ESTOQUE POR ÁREA (PIZZA)
+# =====================================================
+with col_g3:
 
-        st.plotly_chart(fig_top5, use_container_width=True)
+    estoque_area = (
+        df_ocupado
+        .groupby('Área_Exibicao')['Quantidade']
+        .sum()
+        .reset_index()
+    )
 
-    # =====================================================
-    # 3️⃣ ESTOQUE POR ÁREA (PIZZA)
-    # =====================================================
-    with col_g3:
+    cores_area = [
+        mapa_cores.get(area, '#cccccc')
+        for area in estoque_area['Área_Exibicao']
+    ]
 
-        estoque_area = (
-            df_ocupado
-            .groupby('Área_Exibicao')['Quantidade']
-            .sum()
-            .reset_index()
-        )
+    fig_area = go.Figure(data=[go.Pie(
+        labels=estoque_area['Área_Exibicao'],
+        values=estoque_area['Quantidade'],
+        textinfo='percent+label',
+        hovertemplate="<b>%{label}</b><br>Qtd: %{value}<extra></extra>",
+        marker=dict(colors=cores_area)
+    )])
 
-        cores_area = [
-            mapa_cores.get(area, '#cccccc')
-            for area in estoque_area['Área_Exibicao']
-        ]
+    fig_area.update_layout(
+        title="Distribuição de Estoque por Área",
+        height=350,
+        margin=dict(t=60, b=0, l=0, r=0)
+    )
 
-        fig_area = go.Figure(data=[go.Pie(
-            labels=estoque_area['Área_Exibicao'],
-            values=estoque_area['Quantidade'],
-            textinfo='percent+label',
-            hovertemplate="<b>%{label}</b><br>Qtd: %{value}<extra></extra>",
-            marker=dict(colors=cores_area)
-        )])
+    st.plotly_chart(fig_area, use_container_width=True)
 
-        fig_area.update_layout(
-            title="Distribuição de Estoque por Área",
-            height=350,
-            margin=dict(t=60, b=0, l=0, r=0)
-        )
-
-        st.plotly_chart(fig_area, use_container_width=True)
-
-    st.markdown("---")
+st.markdown("---")
 
 # --- BARRA LATERAL: FILTROS GERAIS ---
 st.sidebar.header("🔍 2. Filtros Globais")
@@ -268,11 +304,6 @@ st.markdown("---")
 # ABAS DE VISUALIZAÇÃO 3D
 # ==========================================
 aba_macro, aba_micro = st.tabs(["🌐 Visão Global (Mapa do CD)", "🏗️ Visão Realista do Corredor (Porta-Paletes)"])
-
-paleta_segura = ['#1f77b4', '#2ca02c', '#ff7f0e', '#9467bd', '#8c564b', '#17becf', '#e377c2', '#7f7f7f', '#bcbd22']
-mapa_cores = {' ESTRUTURA VAZIA': 'gray'}
-for i, area in enumerate(areas_disponiveis):
-    mapa_cores[area] = paleta_segura[i % len(paleta_segura)]
 
 evento_macro = None
 evento_micro = None
