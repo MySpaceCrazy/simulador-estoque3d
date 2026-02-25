@@ -268,9 +268,9 @@ with col_g1:
         showlegend=False
     )
 
-    st.caption("X = Colunas | Y = Corredores | Z = Níveis")
-
     st.plotly_chart(fig_ocupacao, use_container_width=True)
+
+    st.caption("X = Colunas | Y = Corredores | Z = Níveis")
 
 # =====================================================
 # 2️⃣ TOP 5 PRODUTOS (BARRA HORIZONTAL)
