@@ -111,17 +111,18 @@ def carregar_dados(arquivo):
     try:
         df_layout = pd.read_csv("EXPORT_20260224_122851.xlsx - Data.csv", encoding="latin-1", sep=";")
         # st.write(df_layout.columns.tolist()) # Validação colunas carregadas
-        import unicodedata
 
         def normalizar_coluna(col):
             col = col.strip()
 
             # remove acentos (FUNCIONA PARA MAIÚSCULO E MINÚSCULO)
+            import unicodedata
             col = unicodedata.normalize('NFKD', col)
             col = col.encode('ASCII', 'ignore').decode('ASCII')
 
             # troca espaços
             col = col.replace(" ", "_")
+            col = col.replace(".", "")
 
             return col
 
