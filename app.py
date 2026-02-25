@@ -22,7 +22,16 @@ def normalizar_colunas(df):
     )
     return df
 
-
+# ==============================
+# EIXO 3D PADRÃO (GLOBAL)
+# ==============================
+eixo_invisivel = dict(
+    showbackground=False,
+    showgrid=False,
+    zeroline=False,
+    showticklabels=False,
+    title=""
+)
 
 
 st.set_page_config(page_title="Simulador de Estoque 3D", layout="wide")
@@ -414,8 +423,17 @@ with aba_macro:
             trace.marker.size = 3.5 
 
     fig_macro.update_layout(
-        scene=dict(xaxis_title='Colunas', yaxis_title='Corredores', zaxis_title='Níveis', aspectmode='manual', aspectratio=dict(x=3.5, y=1.5, z=0.5)),
-        dragmode="turntable", height=600, margin=dict(l=0, r=0, b=0, t=0), hoverlabel=dict(namelength=-1)
+        scene=dict(
+            xaxis={**eixo_invisivel, "title": "Colunas"},
+            yaxis={**eixo_invisivel, "title": "Corredores"},
+            zaxis={**eixo_invisivel, "title": "Níveis"},
+            aspectmode='manual',
+            aspectratio=dict(x=3.5, y=1.5, z=0.5)
+        ),
+        dragmode="turntable",
+        height=600,
+        margin=dict(l=0, r=0, b=0, t=0),
+        hoverlabel=dict(namelength=-1)
     )
 
     # Mostra o gráfico e captura cliques
@@ -451,6 +469,8 @@ with aba_micro:
         # ------------------------------------------
         traces_paletes = list(fig_micro.data)
         fig_micro.data = []
+
+        fig_micro.update_layout(scene=dict())
 
         for trace in traces_paletes:
             nome_legenda = trace.name
@@ -664,6 +684,24 @@ with aba_micro:
         # ------------------------------------------
         for t in traces_paletes:
             fig_micro.add_trace(t)
+
+        import numpy as np
+        tamanho_x = 1 if not np.isfinite(tamanho_x) else float(tamanho_x)
+
+        # ==============================
+        # SEGURANÇA DO ASPECT RATIO
+        # ==============================
+        try:
+            tamanho_x = float(tamanho_x)
+            if tamanho_x <= 0:
+                tamanho_x = 1
+        except:
+            tamanho_x = 1
+
+        # ==========================================
+        # PROTEÇÃO CONTRA ERRO DE ESCALA 3D (Plotly bug)
+        # ==========================================
+        tamanho_x = max(float(tamanho_x), 0.1)
 
         fig_micro.update_layout(
             scene=dict(xaxis=eixo_invisivel, yaxis=eixo_invisivel,zaxis=eixo_invisivel,aspectmode='manual',aspectratio=dict(x=tamanho_x, y=0.5, z=0.8),
