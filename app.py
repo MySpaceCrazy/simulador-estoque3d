@@ -3,6 +3,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import numpy as np
+import re
 from datetime import datetime
 
 st.set_page_config(page_title="Simulador de Estoque 3D", layout="wide")
@@ -33,13 +34,29 @@ def carregar_dados(arquivo):
     except FileNotFoundError:
         return pd.DataFrame()
 
-    df_layout[['Corredor', 'Coluna', 'Nível', 'Posição_Extra']] = df_layout['Posição no depósito'].str.split('-', expand=True)
-    df_layout['Corredor'] = pd.to_numeric(df_layout['Corredor'])
-    df_layout['Coluna'] = pd.to_numeric(df_layout['Coluna'])
-    df_layout['Nível'] = pd.to_numeric(df_layout['Nível'])
-    df_layout['Y_Plot'] = df_layout['Corredor'] * 3
-    df_layout['Y_Plot'] = df_layout.apply(lambda row: row['Y_Plot'] + 0.8 if row['Coluna'] % 2 == 0 else row['Y_Plot'] - 0.8, axis=1)
-    df_layout['Y_Micro'] = df_layout['Coluna'].apply(lambda x: 1 if x % 2 == 0 else -1)
+    # Tratamento de coordenadas
+    df_layout[['Corr_Num', 'Col_Num', 'Niv_Num', 'Pos_Extra']] = df_layout['Posição no depósito'].str.split('-', expand=True)
+    df_layout['Corredor'] = pd.to_numeric(df_layout['Corr_Num'])
+    df_layout['Coluna'] = pd.to_numeric(df_layout['Col_Num'])
+    df_layout['Nível'] = pd.to_numeric(df_layout['Niv_Num'])
+    
+    # EXTRAÇÃO DA ALTURA REAL (P160 -> 1.6)
+    def extrair_altura(texto):
+        nums = re.findall(r'\d+', str(texto))
+        return float(nums[0]) / 100 if nums else 1.6 # Default 1.6m se não achar
+    
+    df_layout['Altura_Nivel'] = df_layout['Tp.posição depósito'].apply(extrair_altura)
+    
+    # CÁLCULO DE Z ACUMULADO (Empilhamento Real)
+    # Ordenamos por endereço para garantir que o nível 010 venha antes do 020 no cálculo
+    df_layout = df_layout.sort_values(['Corredor', 'Coluna', 'Nível'])
+    df_layout['Z_Real'] = df_layout.groupby(['Corredor', 'Coluna'])['Altura_Nivel'].cumsum() - df_layout['Altura_Nivel']
+    
+    # Ajuste Y (Corredores e Ruas)
+    df_layout['Y_Plot'] = df_layout['Corredor'] * 4
+    df_layout['Y_Plot'] = df_layout.apply(lambda row: row['Y_Plot'] + 1.0 if row['Coluna'] % 2 == 0 else row['Y_Plot'] - 1.0, axis=1)
+    df_layout['Y_Micro'] = df_layout['Coluna'].apply(lambda x: 1.2 if x % 2 == 0 else -1.2)
+    
     df_layout['Área_Exibicao'] = df_layout['Área armazmto.'].fillna('Desconhecido')
 
     if arquivo:
@@ -85,75 +102,66 @@ if area_sel != "Todas": df_filtrado = df_filtrado[df_filtrado["Área_Exibicao"] 
 if prod_sel: df_filtrado = df_filtrado[df_filtrado["Produto"].astype(str).str.contains(prod_sel)]
 if end_sel: df_filtrado = df_filtrado[df_filtrado["Posição no depósito"].str.contains(end_sel)]
 
-# --- 3. DASHBOARD SUPERIOR (PONTO 2) ---
+# --- 3. DASHBOARD ---
 st.markdown("### 📊 Painel de Controle")
 df_real = df[df['Área_Exibicao'] != 'Desconhecido']
 ocupadas = len(df_real[df_real['Status'] == 'Ocupado'])
 vazias = len(df_real[df_real['Status'] == 'Vazio'])
-taxa = (ocupadas/(ocupadas+vazias)*100) if (ocupadas+vazias)>0 else 0
-
 m1, m2, m3, m4 = st.columns(4)
 m1.metric("📦 Ocupadas", formata_br(ocupadas))
 m2.metric("🟩 Vazias", formata_br(vazias))
-m3.metric("📈 Ocupação", f"{taxa:.1f}%")
+m3.metric("📈 Ocupação", f"{(ocupadas/(ocupadas+vazias)*100):.1f}%")
 m4.metric("🔍 Unid. no Filtro", formata_br(df_filtrado[df_filtrado['Status'] == 'Ocupado']['Quantidade'].sum()))
 
-g1, g2 = st.columns([1, 2])
-with g1:
-    st.plotly_chart(px.pie(names=['Ocupadas', 'Vazias'], values=[ocupadas, vazias], hole=0.5, height=300, title="Ocupação Geral"), use_container_width=True)
-with g2:
-    df_top = df_real[df_real['Status'] == 'Ocupado'].groupby('Produto')['Quantidade'].sum().reset_index().sort_values('Quantidade', ascending=False).head(5)
-    st.plotly_chart(px.bar(df_top, x='Quantidade', y='Produto', orientation='h', title="Top 5 Produtos", height=300), use_container_width=True)
-
 # --- 4. ABAS 3D ---
-st.markdown("---")
-aba1, aba2 = st.tabs(["🌐 Visão Global", "🏗️ Visão Realista (Corredor)"])
+aba1, aba2 = st.tabs(["🌐 Visão Global", "🏗️ Visão Realista (Alturas de Engenharia)"])
 
 paleta = ['#1f77b4', '#2ca02c', '#ff7f0e', '#9467bd', '#8c564b', '#17becf']
 cores_map = {' ESTRUTURA VAZIA': 'gray'}
 for i, a in enumerate(areas): cores_map[a] = paleta[i % len(paleta)]
 
-evento_macro = None
-evento_micro = None
-
 with aba1:
-    if df_filtrado.empty: st.warning("Sem dados no filtro.")
-    else:
-        fig_macro = px.scatter_3d(df_filtrado, x='Coluna', y='Y_Plot', z='Nível', color='Cor_Plot', color_discrete_map=cores_map,
-                                  hover_name='Posição no depósito', height=600)
-        fig_macro.update_layout(scene=dict(aspectmode='manual', aspectratio=dict(x=3.5, y=1.5, z=0.5)), dragmode="turntable")
-        evento_macro = st.plotly_chart(fig_macro, use_container_width=True, on_select="rerun", selection_mode="points", key="m1")
+    fig_macro = px.scatter_3d(df_filtrado, x='Coluna', y='Y_Plot', z='Z_Real', color='Cor_Plot', 
+                              color_discrete_map=cores_map, hover_name='Posição no depósito', height=600)
+    fig_macro.update_layout(scene=dict(aspectmode='data'), dragmode="turntable")
+    evento_macro = st.plotly_chart(fig_macro, use_container_width=True, on_select="rerun", selection_mode="points", key="m1")
 
 with aba2:
     corr_alvo = st.selectbox("Selecione o Corredor:", sorted(df['Corredor'].unique()))
     df_c = df_filtrado[df_filtrado['Corredor'] == corr_alvo]
-    if df_c.empty: st.info("Corredor vazio com este filtro.")
+    
+    if df_c.empty: 
+        st.info("Corredor vazio com este filtro.")
     else:
-        fig_micro = px.scatter_3d(df_c, x='Coluna', y='Y_Micro', z='Nível', color='Cor_Plot', color_discrete_map=cores_map, height=700)
-        # DESENHAR ESTRUTURA (PONTO 3)
-        max_n = df_c['Nível'].max()
-        cols = sorted(df_c['Coluna'].unique())
-        for side in [-1, 1]:
-            side_df = df_c[df_c['Y_Micro'] == side]
-            if side_df.empty: continue
-            min_col, max_col = side_df['Coluna'].min(), side_df['Coluna'].max()
-            for c in range(min_col, max_col + 2, 2):
-                fig_micro.add_trace(criar_caixa(c-1.1, side*1.2, 0, 0.2, 0.5, max_n+0.5, "#2c3e50")) # Colunas
-            for n in range(1, int(max_n)+1):
-                fig_micro.add_trace(criar_caixa(min_col-1.1, side*1.2, n-0.2, (max_col-min_col)+2, 0.1, 0.1, "#e67e22")) # Vigas
+        # Gráfico base: agora o Z é a 'Z_Real' (altura acumulada em metros)
+        fig_micro = px.scatter_3d(df_c, x='Coluna', y='Y_Micro', z='Z_Real', color='Cor_Plot', 
+                                  color_discrete_map=cores_map, height=750)
         
-        fig_micro.update_layout(scene=dict(xaxis=dict(showgrid=False), yaxis=dict(showgrid=False), zaxis=dict(showgrid=False)), dragmode="turntable")
+        max_h = df_c['Z_Real'].max() + 2
+        for side in df_c['Y_Micro'].unique():
+            df_side = df_c[df_c['Y_Micro'] == side]
+            min_col, max_col = df_side['Coluna'].min(), df_side['Coluna'].max()
+            
+            # COLUNAS (Montantes)
+            for c in range(min_col, max_col + 2, 2):
+                fig_micro.add_trace(criar_caixa(c-1.1, side-0.4, 0, 0.2, 0.8, max_h, "#2c3e50", 0.8))
+            
+            # VIGAS (Baseadas no Tp.posição depósito)
+            for _, row in df_side.iterrows():
+                # Desenha a viga exatamente na base (Z_Real) de cada endereço
+                fig_micro.add_trace(criar_caixa(row['Coluna']-1.1, side-0.4, row['Z_Real'], 2.2, 0.8, 0.1, "#e67e22", 0.9))
+        
+        fig_micro.update_layout(scene=dict(xaxis=dict(showgrid=False), yaxis=dict(showgrid=False), zaxis=dict(showgrid=True),
+                                aspectmode='data'), dragmode="turntable")
         evento_micro = st.plotly_chart(fig_micro, use_container_width=True, on_select="rerun", selection_mode="points", key="m2")
 
-# --- 5. FICHA TÉCNICA (PONTO 1) ---
-ev = evento_macro if (evento_macro and len(evento_macro.selection.points)>0) else evento_micro
-if ev and len(ev.selection.points)>0:
+# --- 5. FICHA TÉCNICA ---
+ev = evento_macro if (evento_macro and len(evento_macro.selection.points)>0) else (evento_micro if (evento_micro and len(evento_micro.selection.points)>0) else None)
+if ev:
     end = ev.selection.points[0]["hovertext"]
     d = df[df['Posição no depósito'] == end].iloc[0]
     st.markdown(f"### 📋 Ficha Técnica: `{end}`")
     c1, c2, c3 = st.columns(3)
-    c1.write(f"**Área:** {d['Área_Exibicao']}\n\n**Status:** {d['Status']}")
+    c1.write(f"**Área:** {d['Área_Exibicao']}\n\n**Altura do Nível:** {d['Altura_Nivel']}m ({d['Tp.posição depósito']})")
     c2.write(f"**Produto:** {d['Produto']}\n\n**Descrição:** {d.get('Descrição produto','-')}")
     c3.write(f"**Quantidade:** {formata_br(d['Quantidade'])}\n\n**UC:** {d.get('Unidade comercial','-')}")
-    if pd.notna(d['Vencimento']):
-        st.error(f"📅 **Vencimento:** {d['Vencimento'].strftime('%d/%m/%Y')}") if d['Vencido'] else st.success(f"📅 **Vencimento:** {d['Vencimento'].strftime('%d/%m/%Y')}")
