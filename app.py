@@ -438,7 +438,7 @@ with aba_macro:
     )
 
     # Mostra o gráfico e captura cliques
-    selecionados_macro = plotly_events(fig_macro, click_event=True, hover_event=False)
+    selecionados_macro = plotly_events(fig_macro, click_event=True, hover_event=False, key="clique_macro")
 
     # Verifica se houve clique
     if selecionados_macro:
@@ -677,7 +677,7 @@ with aba_micro:
                     )
 
         # Eixos Invisíveis para efeito de Jogo/Maquete
-        eixo_invisivel = dict(showbackground=False, showgrid=False, showline=False, showticklabels=False, title='')
+        eixo_invisivel = dict(showbackground=False, showgrid=False, zeroline=False, showticklabels=False, title='')
         tamanho_x = max(2, len(df_corredor['Coluna'].unique()) * 0.15)
 
         # ------------------------------------------
@@ -720,7 +720,7 @@ with aba_micro:
             dragmode="turntable", height=800, margin=dict(l=0, r=0, b=0, t=0), showlegend=False, hoverlabel=dict(namelength=-1)
         )
         # Mostra o gráfico e captura cliques
-        selecionados_micro = plotly_events(fig_micro, click_event=True, hover_event=False)
+        selecionados_micro = plotly_events(fig_micro, click_event=True, hover_event=False, key="clique_micro")
 
         # Verifica se houve clique
         if selecionados_micro:
