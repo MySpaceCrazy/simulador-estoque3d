@@ -3,7 +3,26 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import numpy as np
+import re
+import unicodedata
 from datetime import datetime
+
+# ===== NORMALIZADOR UNIVERSAL DE COLUNAS =====
+def normalizar_colunas(df):
+    df.columns = (
+        df.columns
+        .str.strip()
+        .str.normalize("NFKD")
+        .str.encode("ascii", errors="ignore")
+        .str.decode("utf-8")
+        .str.replace(" ", "_")
+        .str.replace(".", "", regex=False)
+        .str.replace("/", "_")
+    )
+    return df
+
+
+
 
 st.set_page_config(page_title="Simulador de Estoque 3D", layout="wide")
 
@@ -112,21 +131,7 @@ def carregar_dados(arquivo):
         df_layout = pd.read_csv("EXPORT_20260224_122851.xlsx - Data.csv", encoding="latin-1", sep=";")
         # st.write(df_layout.columns.tolist()) # Validação colunas carregadas
 
-        def normalizar_coluna(col):
-            col = col.strip()
-
-            # remove acentos (FUNCIONA PARA MAIÚSCULO E MINÚSCULO)
-            import unicodedata
-            col = unicodedata.normalize('NFKD', col)
-            col = col.encode('ASCII', 'ignore').decode('ASCII')
-
-            # troca espaços
-            col = col.replace(" ", "_")
-            col = col.replace(".", "")
-
-            return col
-
-        df_layout.columns = [normalizar_coluna(c) for c in df_layout.columns]
+        df_layout = normalizar_colunas(df_layout)
 
         st.write("Colunas após normalização:")
         st.write(df_layout.columns.tolist())
@@ -165,13 +170,18 @@ def carregar_dados(arquivo):
                 dados_estoque = pd.read_csv(arquivo, sep=None, engine='python', encoding='latin-1')
         else:
             dados_estoque = pd.read_excel(arquivo)
+
+        dados_estoque = normalizar_colunas(dados_estoque)
             
         if 'Data do vencimento' in dados_estoque.columns:
             dados_estoque = dados_estoque.rename(columns={'Data do vencimento': 'Vencimento'})
             
         if 'Vencimento' in dados_estoque.columns:
             dados_estoque['Vencimento'] = pd.to_datetime(dados_estoque['Vencimento'], errors='coerce')
-            
+
+        st.write("Layout cols:", df_layout.columns.tolist())
+        st.write("Estoque cols:", dados_estoque.columns.tolist())
+
         df_completo = pd.merge(df_layout, dados_estoque, on="Posicao_no_deposito", how="left")
         
         df_completo['Produto'] = df_completo.get('Produto', pd.Series(['-']*len(df_completo))).fillna('-')
