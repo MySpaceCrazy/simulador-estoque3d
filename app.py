@@ -110,6 +110,7 @@ if arquivo_estoque != st.session_state.arquivo_anterior:
 def carregar_dados(arquivo):
     try:
         df_layout = pd.read_csv("EXPORT_20260224_122851.xlsx - Data.csv", encoding="latin-1", sep=";")
+        st.write(df_layout.columns.tolist()) # Validação colunas carregadas
     except FileNotFoundError:
         st.error("Arquivo de layout não encontrado na pasta.")
         return pd.DataFrame()
