@@ -111,14 +111,33 @@ def carregar_dados(arquivo):
     try:
         df_layout = pd.read_csv("EXPORT_20260224_122851.xlsx - Data.csv", encoding="latin-1", sep=";")
         st.write(df_layout.columns.tolist()) # Validação colunas carregadas
+        df_layout.columns = (
+            df_layout.columns
+            .str.strip()
+            .str.replace("ç", "c")
+            .str.replace("ã", "a")
+            .str.replace("á", "a")
+            .str.replace("é", "e")
+            .str.replace("í", "i")
+            .str.replace("ó", "o")
+            .str.replace("ú", "u")
+            .str.replace(" ", "_", regex=False)
+        )
+
+        st.write("Colunas após normalização:")
+        st.write(df_layout.columns.tolist())
+
+        print("COLUNAS DO LAYOUT:")
+        print(df_layout.columns.tolist())
+
     except FileNotFoundError:
         st.error("Arquivo de layout não encontrado na pasta.")
         return pd.DataFrame()
 
-    df_layout[['Corredor', 'Coluna', 'Nível', 'Posição_Extra']] = df_layout['Posição no depósito'].str.split('-', expand=True)
+    df_layout[['Corredor', 'Coluna', 'Nivel', 'Posicao_Extra']] = df_layout['Posicao_no_deposito'].str.split('-', expand=True)
     df_layout['Corredor'] = pd.to_numeric(df_layout['Corredor'])
     df_layout['Coluna'] = pd.to_numeric(df_layout['Coluna'])
-    df_layout['Nível'] = pd.to_numeric(df_layout['Nível'])
+    df_layout['Nivel'] = pd.to_numeric(df_layout['Nivel'])
     
     # Cálculo Y para Visão Macro
     df_layout['Y_Plot'] = df_layout['Corredor'] * 3
@@ -126,12 +145,12 @@ def carregar_dados(arquivo):
     
     # Cálculo Y para Visão Micro (Ímpar -1, Par 1)
     df_layout['Y_Micro'] = df_layout['Coluna'].apply(lambda x: 1 if x % 2 == 0 else -1)
-    df_layout['Área_Exibicao'] = df_layout['Área armazmto.'].fillna('Desconhecido')
+    df_layout['Área_Exibicao'] = df_layout['Area_armazmto.'].fillna('Desconhecido')
 
     # ==========================================
     # ALTURA REAL DO NÍVEL (BASEADO NO SAP)
     # ==========================================
-    df_layout['Altura_cm'] = df_layout['Tp. Na posição depósito'].apply(extrair_altura)
+    df_layout['Altura_cm'] = df_layout['Tpposicao_deposito'].apply(extrair_altura)
 
     # converte para escala 3D (metros visuais)
     df_layout['Altura_plot'] = df_layout['Altura_cm'] / 100
@@ -152,7 +171,7 @@ def carregar_dados(arquivo):
         if 'Vencimento' in dados_estoque.columns:
             dados_estoque['Vencimento'] = pd.to_datetime(dados_estoque['Vencimento'], errors='coerce')
             
-        df_completo = pd.merge(df_layout, dados_estoque, on="Posição no depósito", how="left")
+        df_completo = pd.merge(df_layout, dados_estoque, on="Posicao_no_deposito", how="left")
         
         df_completo['Produto'] = df_completo.get('Produto', pd.Series(['-']*len(df_completo))).fillna('-')
         df_completo['Quantidade'] = df_completo.get('Quantidade', pd.Series([0]*len(df_completo))).fillna(0)
@@ -323,7 +342,7 @@ if area_pesquisa != "Todas":
 if produto_pesquisa:
     df_filtrado = df_filtrado[(df_filtrado["Produto"].astype(str).str.contains(produto_pesquisa, na=False)) | (df_filtrado['Status'] == 'Vazio')]
 if endereco_pesquisa:
-    df_filtrado = df_filtrado[(df_filtrado["Posição no depósito"].str.contains(endereco_pesquisa, na=False)) | (df_filtrado['Status'] == 'Vazio')]
+    df_filtrado = df_filtrado[(df_filtrado["Posicao_no_deposito"].str.contains(endereco_pesquisa, na=False)) | (df_filtrado['Status'] == 'Vazio')]
 if data_pesquisa != "Todas":
     df_filtrado = df_filtrado[(df_filtrado['Vencimento'].dt.date == data_pesquisa) | (df_filtrado['Status'] == 'Vazio')]
 
@@ -361,7 +380,7 @@ with aba_macro:
     st.markdown("##### 📍 Heatmap e Radar do Galpão")
     fig_macro = px.scatter_3d(
         df_filtrado, x='Coluna', y='Y_Plot', z='Altura_plot', color='Cor_Plot',
-        color_discrete_map=mapa_cores, hover_name='Posição no depósito',
+        color_discrete_map=mapa_cores, hover_name='Posicao_no_deposito',
         hover_data={'Status': True, 'Produto': True, 'Quantidade': True, 'Vencido': True, 'Cor_Plot': False, 'Coluna': False, 'Y_Plot': False, 'Altura_plot': False,'Altura_cm': True, 'Corredor': False}
     )
 
@@ -399,7 +418,7 @@ with aba_micro:
         # 1. Desenha os paletes e dados flutuantes usando Scatter3D (para capturar os cliques e informações)
         fig_micro = px.scatter_3d(
             df_corredor, x='Coluna', y='Y_Micro', z='Altura_plot', color='Cor_Plot',
-            color_discrete_map=mapa_cores, hover_name='Posição no depósito',
+            color_discrete_map=mapa_cores, hover_name='Posicao_no_deposito',
             hover_data={'Status': True, 'Produto': True, 'Quantidade': True, 'Vencido': True, 'Cor_Plot': False, 'Coluna': False, 'Y_Micro': False, 'Altura_plot': False,'Altura_cm': True, 'Corredor': False}
         )
 
@@ -653,7 +672,7 @@ if evento_ativo:
     ponto_clicado = evento_ativo.selection.points[0]
     endereco_clicado = ponto_clicado["hovertext"]
     
-    dados_endereco = df[df['Posição no depósito'] == endereco_clicado].iloc[0]
+    dados_endereco = df[df['Posicao_no_deposito'] == endereco_clicado].iloc[0]
     
     st.markdown("---")
     st.markdown(f"### 📋 Ficha Técnica: Endereço `{endereco_clicado}`")
@@ -662,7 +681,7 @@ if evento_ativo:
     with col_d1:
         st.write(f"**🟢 Status:** {dados_endereco['Status']}")
         st.write(f"**🏢 Área Armaz.:** {dados_endereco['Área_Exibicao']}")
-        st.write(f"**📏 Tipo Depósito:** {dados_endereco.get('Tipo de depósito', 'N/A')}")
+        st.write(f"**📏 Tipo Depósito:** {dados_endereco.get('Tipo_de_deposito', 'N/A')}")
         
     with col_d2:
         st.write(f"**🏷️ Código Produto:** {dados_endereco['Produto']}")
