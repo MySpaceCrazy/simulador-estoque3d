@@ -146,7 +146,7 @@ def carregar_dados(arquivo):
     
     # Cálculo Y para Visão Micro (Ímpar -1, Par 1)
     df_layout['Y_Micro'] = df_layout['Coluna'].apply(lambda x: 1 if x % 2 == 0 else -1)
-    df_layout['Área_Exibicao'] = df_layout['Area_armazmto.'].fillna('Desconhecido')
+    df_layout['Área_Exibicao'] = df_layout['Area_armazmto'].fillna('Desconhecido')
 
     # ==========================================
     # ALTURA REAL DO NÍVEL (BASEADO NO SAP)
