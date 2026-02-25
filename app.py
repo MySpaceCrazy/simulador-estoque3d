@@ -398,8 +398,9 @@ st.markdown("---")
 # ==========================================
 aba_macro, aba_micro = st.tabs(["🌐 Visão Global (Mapa do CD)", "🏗️ Visão Realista do Corredor (Porta-Paletes)"])
 
-evento_macro = None
-evento_micro = None
+# Inicializa as variáveis para evitar o NameError
+selecionados_macro = []
+selecionados_micro = []
 
 # --- ABA 1: VISÃO MACRO (Galpão Inteiro) ---
 with aba_macro:
@@ -705,19 +706,24 @@ with aba_micro:
         tamanho_x = max(float(tamanho_x), 0.1)
 
         fig_micro.update_layout(
-            scene=dict(xaxis=eixo_invisivel, yaxis=eixo_invisivel,zaxis=eixo_invisivel,aspectmode='manual',aspectratio=dict(x=tamanho_x, y=0.5, z=0.8),
+            scene=dict(
+                xaxis=eixo_invisivel, 
+                yaxis=eixo_invisivel,
+                zaxis=eixo_invisivel,
+                aspectmode='manual',
+                aspectratio=dict(x=tamanho_x, y=0.5, z=0.8),
                 camera=dict(
                     eye=dict(x=1.6, y=1.6, z=1.2)
-                ),
-
-                lightposition=dict(
-                    x=100,
-                    y=200,
-                    z=300
                 )
+                # O bloco lightposition foi completamente removido daqui
             ),
-            paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-            dragmode="turntable", height=800, margin=dict(l=0, r=0, b=0, t=0), showlegend=False, hoverlabel=dict(namelength=-1)
+            paper_bgcolor='rgba(0,0,0,0)', 
+            plot_bgcolor='rgba(0,0,0,0)',
+            dragmode="turntable", 
+            height=800, 
+            margin=dict(l=0, r=0, b=0, t=0), 
+            showlegend=False, 
+            hoverlabel=dict(namelength=-1)
         )
         # Mostra o gráfico e captura cliques
         selecionados_micro = plotly_events(fig_micro, click_event=True, hover_event=False, key="clique_micro")
