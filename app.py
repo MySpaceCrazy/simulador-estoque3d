@@ -10,6 +10,22 @@ st.set_page_config(page_title="Simulador de Estoque 3D", layout="wide")
 def formata_br(numero):
     return f"{numero:,.0f}".replace(",", ".")
 
+
+# ==========================================
+# EXTRAI ALTURA REAL DO NÍVEL (P160 → 160)
+# ==========================================
+def extrair_altura(tp):
+    """
+    Converte valores como:
+    P160 -> 160
+    P120 -> 120
+    """
+    if pd.isna(tp):
+        return 160  # altura padrão de segurança
+
+    numeros = ''.join(filter(str.isdigit, str(tp)))
+    return int(numeros) if numeros else 160
+
 # ==============================
 # FUNÇÃO PARA DESENHAR 3D (Racks)
 # ==============================
@@ -24,6 +40,29 @@ def criar_caixa(x, y, z, dx, dy, dz, cor, opacity=1.0):
         k=[2,3,1,5,6,7,6,7,4,1,2,3],
         color=cor, opacity=opacity, flatshading=True, hoverinfo='skip', showscale=False
     )
+
+# ==========================================
+# SOMBREAMENTO POR ALTURA (ILUMINAÇÃO FAKE)
+# ==========================================
+def ajustar_cor_por_altura(cor_hex, altura, altura_max):
+    """
+    Clareia a cor conforme a altura (simula luz vindo de cima)
+    """
+
+    cor_hex = cor_hex.lstrip('#')
+
+    r = int(cor_hex[0:2], 16)
+    g = int(cor_hex[2:4], 16)
+    b = int(cor_hex[4:6], 16)
+
+    fator = 0.55 + (altura / altura_max) * 0.45
+
+    r = min(255, int(r * fator))
+    g = min(255, int(g * fator))
+    b = min(255, int(b * fator))
+
+    return f"rgb({r},{g},{b})"
+
 # ==========================================
 # GERADOR DO MAPA DE CORES (ANTI-RERUN BUG)
 # ==========================================
@@ -87,6 +126,14 @@ def carregar_dados(arquivo):
     # Cálculo Y para Visão Micro (Ímpar -1, Par 1)
     df_layout['Y_Micro'] = df_layout['Coluna'].apply(lambda x: 1 if x % 2 == 0 else -1)
     df_layout['Área_Exibicao'] = df_layout['Área armazmto.'].fillna('Desconhecido')
+
+    # ==========================================
+    # ALTURA REAL DO NÍVEL (BASEADO NO SAP)
+    # ==========================================
+    df_layout['Altura_cm'] = df_layout['Tp. Na posição depósito'].apply(extrair_altura)
+
+    # converte para escala 3D (metros visuais)
+    df_layout['Altura_plot'] = df_layout['Altura_cm'] / 100
 
     if arquivo is not None:
         if arquivo.name.endswith('.csv'):
@@ -312,9 +359,9 @@ evento_micro = None
 with aba_macro:
     st.markdown("##### 📍 Heatmap e Radar do Galpão")
     fig_macro = px.scatter_3d(
-        df_filtrado, x='Coluna', y='Y_Plot', z='Nível', color='Cor_Plot',
+        df_filtrado, x='Coluna', y='Y_Plot', z='Altura_plot', color='Cor_Plot',
         color_discrete_map=mapa_cores, hover_name='Posição no depósito',
-        hover_data={'Status': True, 'Produto': True, 'Quantidade': True, 'Vencido': True, 'Cor_Plot': False, 'Coluna': False, 'Y_Plot': False, 'Nível': False, 'Corredor': False}
+        hover_data={'Status': True, 'Produto': True, 'Quantidade': True, 'Vencido': True, 'Cor_Plot': False, 'Coluna': False, 'Y_Plot': False, 'Altura_plot': False,'Altura_cm': True, 'Corredor': False}
     )
 
     for trace in fig_macro.data:
@@ -332,7 +379,7 @@ with aba_macro:
 
     fig_macro.update_layout(
         scene=dict(xaxis_title='Colunas', yaxis_title='Corredores', zaxis_title='Níveis', aspectmode='manual', aspectratio=dict(x=3.5, y=1.5, z=0.5)),
-        dragmode="turntable", height=600, margin=dict(l=0, r=0, b=0, t=0)
+        dragmode="turntable", height=600, margin=dict(l=0, r=0, b=0, t=0), hoverlabel=dict(namelength=-1)
     )
     evento_macro = st.plotly_chart(fig_macro, use_container_width=True, on_select="rerun", selection_mode="points", key="macro_chart")
 
@@ -350,10 +397,16 @@ with aba_micro:
     else:
         # 1. Desenha os paletes e dados flutuantes usando Scatter3D (para capturar os cliques e informações)
         fig_micro = px.scatter_3d(
-            df_corredor, x='Coluna', y='Y_Micro', z='Nível', color='Cor_Plot',
+            df_corredor, x='Coluna', y='Y_Micro', z='Altura_plot', color='Cor_Plot',
             color_discrete_map=mapa_cores, hover_name='Posição no depósito',
-            hover_data={'Status': True, 'Produto': True, 'Quantidade': True, 'Vencido': True, 'Cor_Plot': False, 'Coluna': False, 'Y_Micro': False, 'Nível': False, 'Corredor': False}
+            hover_data={'Status': True, 'Produto': True, 'Quantidade': True, 'Vencido': True, 'Cor_Plot': False, 'Coluna': False, 'Y_Micro': False, 'Altura_plot': False,'Altura_cm': True, 'Corredor': False}
         )
+
+        # ------------------------------------------
+        # GUARDA OS PALLETES (para renderizar depois)
+        # ------------------------------------------
+        traces_paletes = list(fig_micro.data)
+        fig_micro.data = []
 
         for trace in fig_micro.data:
             nome_legenda = trace.name
@@ -371,39 +424,217 @@ with aba_micro:
                 trace.marker.symbol = 'square'
                 trace.marker.size = 22 # Tamanho gigante para parecer a caixa no rack
 
+                trace.opacity = 0.92 # Micro transparência (profundidade visual)
+
+        # ==========================================
+        # IDENTIFICA MÓDULOS REAIS DE RACK
+        # ==========================================
+        def pares_consecutivos(colunas):
+            """
+            Retorna pares de colunas vizinhas reais
+            Ex: [1,3,5,11,13] -> [(1,3),(3,5),(11,13)]
+            """
+            colunas = sorted(colunas)
+            pares = []
+
+            for i in range(len(colunas) - 1):
+                atual = colunas[i]
+                prox = colunas[i + 1]
+
+                # módulo válido = diferença padrão (2)
+                if prox - atual == 2:
+                    pares.append((atual, prox))
+
+            return pares
+
+        # ==========================================
+        # ALTURAS REAIS POR ENDEREÇO (PASSO 4)
+        # ==========================================
+        alturas_reais = (
+            df_corredor
+            .groupby(['Corredor', 'Coluna'])['Altura_plot']
+            .max()
+            .reset_index()
+        )
+
+        altura_max_estrutura = alturas_reais['Altura_plot'].max()
+        niveis_reais = sorted(df_corredor['Altura_plot'].dropna().unique())
+
         # 2. GERAÇÃO DINÂMICA DA ESTRUTURA METÁLICA (Mesh3d)
-        max_niv = df_corredor['Nível'].max()
+        # max_niv = df_corredor['Nível'].max()
         
         # Estrutura Lado Ímpar (Y = -1)
         impares = df_corredor[df_corredor['Coluna'] % 2 != 0]['Coluna'].unique()
         if len(impares) > 0:
             min_c, max_c = min(impares), max(impares)
-            for c in range(min_c, max_c + 3, 2):
-                # Coluna Vertical (Azul/Roxo Metálico)
-                fig_micro.add_trace(criar_caixa(c - 1.1, -1.4, 0, 0.2, 0.8, max_niv + 0.5, "#2c3e50"))
-            for n in range(1, int(max_niv) + 1):
-                # Viga Horizontal Laranja Frente e Fundo
-                fig_micro.add_trace(criar_caixa(min_c - 1.1, -0.7, n - 0.2, (max_c - min_c) + 2.2, 0.1, 0.15, "#e67e22"))
-                fig_micro.add_trace(criar_caixa(min_c - 1.1, -1.4, n - 0.2, (max_c - min_c) + 2.2, 0.1, 0.15, "#e67e22"))
+            for c in impares:
+
+                altura_coluna = alturas_reais.loc[
+                    alturas_reais['Coluna'] == c,
+                    'Altura_plot'
+                ].max()
+
+                cor_coluna = ajustar_cor_por_altura(
+                    "#2c3e50",
+                    altura_coluna,
+                    altura_max_estrutura
+                )
+
+                fig_micro.add_trace(
+                    criar_caixa(
+                        c - 1.1,
+                        -1.4,
+                        0,
+                        0.2,
+                        0.8,
+                        altura_coluna + 0.3,
+                        cor_coluna
+                    )
+                )
+            
+            modulos_impares = pares_consecutivos(impares)
+
+            for c1, c2 in modulos_impares:
+
+                largura_modulo = (c2 - c1) + 0.2
+                x_inicio = c1 - 1.1
+
+                for n in niveis_reais:
+                    cor_viga = ajustar_cor_por_altura(
+                        "#e67e22",
+                        n,
+                        altura_max_estrutura
+                    )
+                    # frente
+                    fig_micro.add_trace(
+                        criar_caixa(
+                            x_inicio,
+                            -0.7,
+                            n - 0.08,
+                            largura_modulo,
+                            0.1,
+                            0.15,
+                            cor_viga
+                        )
+                    )
+
+                    cor_viga = ajustar_cor_por_altura(
+                        "#e67e22",
+                        n,
+                        altura_max_estrutura
+                    )
+
+                    # fundo
+                    fig_micro.add_trace(
+                        criar_caixa(
+                            x_inicio,
+                            -1.4,
+                            n - 0.08,
+                            largura_modulo,
+                            0.1,
+                            0.15,
+                            cor_viga
+                        )
+                    )
 
         # Estrutura Lado Par (Y = 1)
         pares = df_corredor[df_corredor['Coluna'] % 2 == 0]['Coluna'].unique()
         if len(pares) > 0:
             min_c, max_c = min(pares), max(pares)
-            for c in range(min_c, max_c + 3, 2):
-                fig_micro.add_trace(criar_caixa(c - 1.1, 0.6, 0, 0.2, 0.8, max_niv + 0.5, "#2c3e50"))
-            for n in range(1, int(max_niv) + 1):
-                fig_micro.add_trace(criar_caixa(min_c - 1.1, 0.6, n - 0.2, (max_c - min_c) + 2.2, 0.1, 0.15, "#e67e22"))
-                fig_micro.add_trace(criar_caixa(min_c - 1.1, 1.3, n - 0.2, (max_c - min_c) + 2.2, 0.1, 0.15, "#e67e22"))
+            for c in pares:
+
+                altura_coluna = alturas_reais.loc[
+                    alturas_reais['Coluna'] == c,
+                    'Altura_plot'
+                ].max()
+
+                cor_coluna = ajustar_cor_por_altura(
+                    "#2c3e50",
+                    altura_coluna,
+                    altura_max_estrutura
+                )
+
+                fig_micro.add_trace(
+                    criar_caixa(
+                        c - 1.1,
+                        0.6,
+                        0,
+                        0.2,
+                        0.8,
+                        altura_coluna + 0.3,
+                        cor_coluna
+                    )
+                )
+
+            modulos_pares = pares_consecutivos(pares)
+
+            for c1, c2 in modulos_pares:
+
+                largura_modulo = (c2 - c1) + 0.2
+                x_inicio = c1 - 1.1
+
+                for n in niveis_reais:
+                    
+                    cor_viga = ajustar_cor_por_altura(
+                        "#e67e22",
+                        n,
+                        altura_max_estrutura
+                    )
+
+                    fig_micro.add_trace(
+                        criar_caixa(
+                            x_inicio,
+                            0.6,
+                            n - 0.08,
+                            largura_modulo,
+                            0.1,
+                            0.15,
+                            cor_viga
+                        )
+                    )
+
+                    cor_viga = ajustar_cor_por_altura(
+                        "#e67e22",
+                        n,
+                        altura_max_estrutura
+                    )
+
+                    fig_micro.add_trace(
+                        criar_caixa(
+                            x_inicio,
+                            1.3,
+                            n - 0.08,
+                            largura_modulo,
+                            0.1,
+                            0.15,
+                            cor_viga
+                        )
+                    )
 
         # Eixos Invisíveis para efeito de Jogo/Maquete
         eixo_invisivel = dict(showbackground=False, showgrid=False, showline=False, showticklabels=False, title='')
         tamanho_x = max(2, len(df_corredor['Coluna'].unique()) * 0.15)
 
+        # ------------------------------------------
+        # REINSERE PALLETES (na frente da estrutura)
+        # ------------------------------------------
+        for t in traces_paletes:
+            fig_micro.add_trace(t)
+
         fig_micro.update_layout(
-            scene=dict(xaxis=eixo_invisivel, yaxis=eixo_invisivel, zaxis=eixo_invisivel, aspectmode='manual', aspectratio=dict(x=tamanho_x, y=0.5, z=0.8)),
+            scene=dict(xaxis=eixo_invisivel, yaxis=eixo_invisivel,zaxis=eixo_invisivel,aspectmode='manual',aspectratio=dict(x=tamanho_x, y=0.5, z=0.8),
+                camera=dict(
+                    eye=dict(x=1.6, y=1.6, z=1.2)
+                ),
+
+                lightposition=dict(
+                    x=100,
+                    y=200,
+                    z=300
+                )
+            ),
             paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-            dragmode="turntable", height=800, margin=dict(l=0, r=0, b=0, t=0), showlegend=False
+            dragmode="turntable", height=800, margin=dict(l=0, r=0, b=0, t=0), showlegend=False, hoverlabel=dict(namelength=-1)
         )
         evento_micro = st.plotly_chart(fig_micro, use_container_width=True, on_select="rerun", selection_mode="points", key="micro_chart")
 
