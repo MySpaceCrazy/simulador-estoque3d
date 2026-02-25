@@ -15,9 +15,9 @@ def normalizar_colunas(df):
         .str.normalize("NFKD")
         .str.encode("ascii", errors="ignore")
         .str.decode("utf-8")
-        .str.replace(" ", "_")
+        .str.replace(" ", "_", regex=False)
         .str.replace(".", "", regex=False)
-        .str.replace("/", "_")
+        .str.replace("/", "_", regex=False)
     )
     return df
 
@@ -122,13 +122,17 @@ if "arquivo_anterior" not in st.session_state:
     st.session_state.arquivo_anterior = None
 
 if arquivo_estoque != st.session_state.arquivo_anterior:
-    st.cache_data.clear()
     st.session_state.arquivo_anterior = arquivo_estoque
+    st.cache_data.clear()  # limpa todos os caches de st.cache_data
 
 @st.cache_data(show_spinner=False)
 def carregar_dados(arquivo):
     try:
         df_layout = pd.read_csv("EXPORT_20260224_122851.xlsx - Data.csv", encoding="latin-1", sep=";")
+        if "csv" in "EXPORT_20260224_122851.xlsx - Data.csv":
+            df_layout = pd.read_csv("EXPORT_20260224_122851.xlsx - Data.csv", encoding="latin-1", sep=";")
+        else:
+            df_layout = pd.read_excel("EXPORT_20260224_122851.xlsx - Data.xlsx")
         # st.write(df_layout.columns.tolist()) # Validação colunas carregadas
 
         df_layout = normalizar_colunas(df_layout)
@@ -412,7 +416,16 @@ with aba_macro:
         scene=dict(xaxis_title='Colunas', yaxis_title='Corredores', zaxis_title='Níveis', aspectmode='manual', aspectratio=dict(x=3.5, y=1.5, z=0.5)),
         dragmode="turntable", height=600, margin=dict(l=0, r=0, b=0, t=0), hoverlabel=dict(namelength=-1)
     )
-    evento_macro = st.plotly_chart(fig_macro, use_container_width=True, on_select="rerun", selection_mode="points", key="macro_chart")
+    from streamlit_plotly_events import plotly_events
+
+    # Mostra o gráfico e captura cliques
+    selecionados_macro = plotly_events(fig_macro, click_event=True, hover_event=False)
+
+    # Verifica se houve clique
+    if selecionados_macro:
+        endereco_clicado = selecionados_macro[0]['hovertext']
+        dados_endereco = df[df['Posicao_no_deposito'] == endereco_clicado].iloc[0]
+        # Aqui você pode renderizar a ficha técnica como já fazia
 
 # --- ABA 2: VISÃO MICRO COM PORTA-PALETES 3D (PONTO 3) ---
 with aba_micro:
@@ -439,7 +452,7 @@ with aba_micro:
         traces_paletes = list(fig_micro.data)
         fig_micro.data = []
 
-        for trace in fig_micro.data:
+        for trace in traces_paletes:
             nome_legenda = trace.name
             if nome_legenda == ' ESTRUTURA VAZIA':
                 # Palete vazio fica quase invisível, pois a estante de aço vai fazer o contorno
@@ -473,7 +486,7 @@ with aba_micro:
                 prox = colunas[i + 1]
 
                 # módulo válido = diferença padrão (2)
-                if prox - atual == 2:
+                if prox - atual == 1:
                     pares.append((atual, prox))
 
             return pares
@@ -667,24 +680,29 @@ with aba_micro:
             paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
             dragmode="turntable", height=800, margin=dict(l=0, r=0, b=0, t=0), showlegend=False, hoverlabel=dict(namelength=-1)
         )
-        evento_micro = st.plotly_chart(fig_micro, use_container_width=True, on_select="rerun", selection_mode="points", key="micro_chart")
+        # Mostra o gráfico e captura cliques
+        selecionados_micro = plotly_events(fig_micro, click_event=True, hover_event=False)
+
+        # Verifica se houve clique
+        if selecionados_micro:
+            endereco_clicado = selecionados_micro[0]['hovertext']
+            dados_endereco = df[df['Posicao_no_deposito'] == endereco_clicado].iloc[0]
+            # Renderizar ficha técnica como antes
 
 
 # ==========================================
 # FICHA COMPLETA DO CLIQUE (PONTO 1)
 # ==========================================
-evento_ativo = None
-if evento_macro and len(evento_macro.selection.points) > 0:
-    evento_ativo = evento_macro
-elif evento_micro and len(evento_micro.selection.points) > 0:
-    evento_ativo = evento_micro
-
-if evento_ativo:
-    ponto_clicado = evento_ativo.selection.points[0]
-    endereco_clicado = ponto_clicado["hovertext"]
+# Verifica se houve clique na Macro ou Micro
+if selecionados_macro or selecionados_micro:
+    
+    if selecionados_macro:
+        endereco_clicado = selecionados_macro[0]['hovertext']
+    else:
+        endereco_clicado = selecionados_micro[0]['hovertext']
     
     dados_endereco = df[df['Posicao_no_deposito'] == endereco_clicado].iloc[0]
-    
+
     st.markdown("---")
     st.markdown(f"### 📋 Ficha Técnica: Endereço `{endereco_clicado}`")
     
@@ -701,7 +719,6 @@ if evento_ativo:
         
     with col_d3:
         st.write(f"**🔢 Quantidade:** {formata_br(dados_endereco['Quantidade'])} un")
-        
         if pd.notna(dados_endereco['Vencimento']):
             data_formatada = dados_endereco['Vencimento'].strftime('%d/%m/%Y')
             if dados_endereco['Vencido']:
