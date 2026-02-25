@@ -27,6 +27,116 @@ def criar_caixa(x, y, z, dx, dy, dz, cor, opacity=1.0):
 
 st.title("📦 Simulador de Estoque 3D - CD Passo Fundo")
 
+# =====================================================
+# DASHBOARD RESUMO (INDICADORES DO CD)
+# =====================================================
+
+if 'df' in locals() and not df.empty:
+
+    st.markdown("### 📊 Indicadores Gerais do Armazém")
+
+    df_ocupado = df[df['Status'] == 'Ocupado']
+    df_vazio = df[df['Status'] == 'Vazio']
+
+    total_posicoes = len(df)
+    pos_ocupadas = len(df_ocupado)
+    pos_vazias = len(df_vazio)
+
+    # =====================================================
+    # LAYOUT EM 3 COLUNAS
+    # =====================================================
+    col_g1, col_g2, col_g3 = st.columns(3)
+
+    # =====================================================
+    # 1️⃣ GRÁFICO ROSCA — OCUPAÇÃO
+    # =====================================================
+    with col_g1:
+
+        fig_ocupacao = go.Figure(data=[go.Pie(
+            labels=['Ocupadas', 'Vazias'],
+            values=[pos_ocupadas, pos_vazias],
+            hole=0.6,
+            textinfo='label+percent',
+            hovertemplate="<b>%{label}</b><br>Qtd: %{value}<extra></extra>",
+            marker=dict(colors=['#2ca02c', '#d3d3d3'])
+        )])
+
+        fig_ocupacao.update_layout(
+            title=f"Ocupação do Armazém<br>{pos_ocupadas:,} / {total_posicoes:,} posições",
+            height=350,
+            margin=dict(t=60, b=0, l=0, r=0),
+            showlegend=False
+        )
+
+        st.plotly_chart(fig_ocupacao, use_container_width=True)
+
+    # =====================================================
+    # 2️⃣ TOP 5 PRODUTOS (BARRA HORIZONTAL)
+    # =====================================================
+    with col_g2:
+
+        top5 = (
+            df_ocupado
+            .groupby('Produto')['Quantidade']
+            .sum()
+            .sort_values(ascending=False)
+            .head(5)
+            .reset_index()
+        )
+
+        fig_top5 = px.bar(
+            top5,
+            x='Quantidade',
+            y='Produto',
+            orientation='h',
+            text='Quantidade',
+            title="Top 5 Produtos com Maior Estoque"
+        )
+
+        fig_top5.update_layout(
+            height=350,
+            yaxis=dict(categoryorder='total ascending'),
+            margin=dict(t=60, b=0, l=0, r=0)
+        )
+
+        st.plotly_chart(fig_top5, use_container_width=True)
+
+    # =====================================================
+    # 3️⃣ ESTOQUE POR ÁREA (PIZZA)
+    # =====================================================
+    with col_g3:
+
+        estoque_area = (
+            df_ocupado
+            .groupby('Área_Exibicao')['Quantidade']
+            .sum()
+            .reset_index()
+        )
+
+        cores_area = [
+            mapa_cores.get(area, '#cccccc')
+            for area in estoque_area['Área_Exibicao']
+        ]
+
+        fig_area = go.Figure(data=[go.Pie(
+            labels=estoque_area['Área_Exibicao'],
+            values=estoque_area['Quantidade'],
+            textinfo='percent+label',
+            hovertemplate="<b>%{label}</b><br>Qtd: %{value}<extra></extra>",
+            marker=dict(colors=cores_area)
+        )])
+
+        fig_area.update_layout(
+            title="Distribuição de Estoque por Área",
+            height=350,
+            margin=dict(t=60, b=0, l=0, r=0)
+        )
+
+        st.plotly_chart(fig_area, use_container_width=True)
+
+    st.markdown("---")
+
+
 # --- BARRA LATERAL: UPLOAD DE ARQUIVO ---
 st.sidebar.header("📁 1. Carga de Dados")
 arquivo_estoque = st.sidebar.file_uploader("Faça upload do Estoque (Excel ou CSV)", type=["xlsx", "csv"])
