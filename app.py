@@ -127,9 +127,6 @@ def carregar_dados(arquivo):
         st.write("Colunas após normalização:")
         st.write(df_layout.columns.tolist())
 
-        print("COLUNAS DO LAYOUT:")
-        print(df_layout.columns.tolist())
-
     except FileNotFoundError:
         st.error("Arquivo de layout não encontrado na pasta.")
         return pd.DataFrame()
