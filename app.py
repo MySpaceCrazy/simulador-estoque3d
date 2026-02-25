@@ -110,19 +110,22 @@ if arquivo_estoque != st.session_state.arquivo_anterior:
 def carregar_dados(arquivo):
     try:
         df_layout = pd.read_csv("EXPORT_20260224_122851.xlsx - Data.csv", encoding="latin-1", sep=";")
-        st.write(df_layout.columns.tolist()) # Validação colunas carregadas
-        df_layout.columns = (
-            df_layout.columns
-            .str.strip()
-            .str.replace("ç", "c")
-            .str.replace("ã", "a")
-            .str.replace("á", "a")
-            .str.replace("é", "e")
-            .str.replace("í", "i")
-            .str.replace("ó", "o")
-            .str.replace("ú", "u")
-            .str.replace(" ", "_", regex=False)
-        )
+        # st.write(df_layout.columns.tolist()) # Validação colunas carregadas
+        import unicodedata
+
+        def normalizar_coluna(col):
+            col = col.strip()
+
+            # remove acentos (FUNCIONA PARA MAIÚSCULO E MINÚSCULO)
+            col = unicodedata.normalize('NFKD', col)
+            col = col.encode('ASCII', 'ignore').decode('ASCII')
+
+            # troca espaços
+            col = col.replace(" ", "_")
+
+            return col
+
+        df_layout.columns = [normalizar_coluna(c) for c in df_layout.columns]
 
         st.write("Colunas após normalização:")
         st.write(df_layout.columns.tolist())
