@@ -30,7 +30,6 @@ eixo_invisivel = dict(
     showgrid=False,
     zeroline=False,
     showticklabels=False,
-    title=""
 )
 
 
@@ -269,6 +268,8 @@ with col_g1:
         showlegend=False
     )
 
+    st.caption("X = Colunas | Y = Corredores | Z = Níveis")
+
     st.plotly_chart(fig_ocupacao, use_container_width=True)
 
 # =====================================================
@@ -470,7 +471,7 @@ with aba_micro:
         traces_paletes = list(fig_micro.data)
         fig_micro.data = []
 
-        fig_micro.update_layout(scene=dict())
+        fig_micro.update_layout(scene=dict( xaxis=dict(**eixo_invisivel), yaxis=dict(**eixo_invisivel), zaxis=dict(**eixo_invisivel)))
 
         for trace in traces_paletes:
             nome_legenda = trace.name
