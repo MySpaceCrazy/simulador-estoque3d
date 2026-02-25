@@ -6,6 +6,7 @@ import numpy as np
 import re
 import unicodedata
 from datetime import datetime
+from streamlit_plotly_events import plotly_events
 
 # ===== NORMALIZADOR UNIVERSAL DE COLUNAS =====
 def normalizar_colunas(df):
@@ -416,7 +417,6 @@ with aba_macro:
         scene=dict(xaxis_title='Colunas', yaxis_title='Corredores', zaxis_title='Níveis', aspectmode='manual', aspectratio=dict(x=3.5, y=1.5, z=0.5)),
         dragmode="turntable", height=600, margin=dict(l=0, r=0, b=0, t=0), hoverlabel=dict(namelength=-1)
     )
-    from streamlit_plotly_events import plotly_events
 
     # Mostra o gráfico e captura cliques
     selecionados_macro = plotly_events(fig_macro, click_event=True, hover_event=False)
